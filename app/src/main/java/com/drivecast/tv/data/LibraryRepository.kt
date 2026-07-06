@@ -1,5 +1,6 @@
 package com.drivecast.tv.data
 
+import com.drivecast.tv.api.AwakeStatus
 import com.drivecast.tv.api.ContinueItem
 import com.drivecast.tv.api.DrivecastApi
 import com.drivecast.tv.api.LibraryResponse
@@ -94,6 +95,14 @@ class LibraryRepository(
         val resp = requireApi().title(id)
         if (resp.isSuccessful) resp.body() else null
     }
+
+    // ---- keep-awake ("Are you still watching?") ----
+
+    suspend fun awakeStatus(): AwakeStatus = withContext(Dispatchers.IO) { requireApi().awakeStatus() }
+
+    suspend fun awakeExtend(): AwakeStatus = withContext(Dispatchers.IO) { requireApi().awakeExtend() }
+
+    suspend fun awakeRelease(): AwakeStatus = withContext(Dispatchers.IO) { requireApi().awakeRelease() }
 
     /** Group the library's titles into ordered section shelves. */
     fun sectionsFrom(lib: LibraryResponse): List<SectionRow> {

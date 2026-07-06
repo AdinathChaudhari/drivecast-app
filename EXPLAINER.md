@@ -77,6 +77,18 @@ season/episode list with watched checkmarks) → **Player**.
    shelf. Dismiss a tile on the TV and it disappears on the web too.
 5. When an episode ends, a 5-second "Up next" overlay counts down to the next
    episode (cancelable with the remote).
+6. **Still-watching handshake.** The Mac has to be awake to relay bytes, so the
+   server holds a macOS power assertion while a stream is active and, after ~2
+   minutes with no bytes flowing, opens a 30-second window before letting the
+   Mac sleep. Once this device has played anything, the app polls
+   `GET /api/awake/status` (every 15s, tightening to 5s as the window closes,
+   and only while the app is foregrounded). While ExoPlayer is actually playing
+   the server stays in its "active" phase, so nothing shows; but if playback is
+   paused/stopped long enough to reach the "prompt" phase, the app pops an
+   **"Are you still watching?"** dialog with a live countdown. **Yes** calls
+   `POST /api/awake/extend` (a fresh grace window); **No** calls
+   `POST /api/awake/release` (sleep now) and backs out of the player. So a TV
+   left paused doesn't pin the Mac awake, while a TV mid-movie always does.
 
 ## Security model
 
