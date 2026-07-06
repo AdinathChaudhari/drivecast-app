@@ -86,6 +86,18 @@ To build the APK yourself:
    repo: `python3 -m http.server 8000 -d app/build/outputs/apk/debug/` and enter
    `http://<your-computer-ip>:8000/app-debug.apk` in Downloader instead.
 
+## Keeping the Mac awake (and letting it sleep)
+
+The server holds a macOS power assertion while a stream is active, so the Mac
+won't sleep out from under a movie. The app answers the server's keep-awake
+handshake so this stays honest: once you've started playback, it checks in with
+the server, and if playback has been paused/stopped long enough that the server
+is about to let the Mac sleep, it shows an **"Are you still watching?"** prompt.
+Choose **Yes, keep watching** to keep the Mac awake for another couple of
+minutes, or **No** to let it sleep right away (which also exits the player if
+it's open). Leave it and the Mac sleeps on its own — a paused TV never keeps
+your Mac awake forever, and an actively-watching TV always does.
+
 ## Building from source
 
 Requirements: JDK 17+ and the Android SDK (platform 34, build-tools 34.0.0). Create a

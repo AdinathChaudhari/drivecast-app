@@ -212,6 +212,9 @@ class PlayerViewModel(
     private inner class PlayerListener : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             if (isPlaying) {
+                // This device is now watching: opt into the server's keep-awake
+                // handshake for the rest of the session.
+                container.keepAwake.markPlaybackStarted()
                 startTicker()
             } else {
                 stopTicker()

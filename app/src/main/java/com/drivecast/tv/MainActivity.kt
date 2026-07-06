@@ -15,11 +15,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.media3.common.util.UnstableApi
+import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.drivecast.tv.ui.awake.KeepAwakeHost
 import com.drivecast.tv.ui.detail.DetailScreen
 import com.drivecast.tv.ui.home.HomeScreen
 import com.drivecast.tv.ui.player.PlayerScreen
@@ -37,7 +39,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             CompositionLocalProvider(LocalAppContainer provides container) {
                 DrivecastTheme {
-                    DrivecastNav()
+                    DrivecastRoot()
                 }
             }
         }
@@ -46,9 +48,26 @@ class MainActivity : ComponentActivity() {
 
 @UnstableApi
 @Composable
-private fun DrivecastNav() {
-    val container = LocalAppContainer.current
+private fun DrivecastRoot() {
     val navController = rememberNavController()
+    Box(Modifier.fillMaxSize()) {
+        DrivecastNav(navController)
+        // Global "Are you still watching?" overlay, above every screen.
+        KeepAwakeHost(
+            onRequestExitPlayer = {
+                val route = navController.currentDestination?.route
+                if (route != null && route.startsWith("player/")) {
+                    navController.popBackStack()
+                }
+            },
+        )
+    }
+}
+
+@UnstableApi
+@Composable
+private fun DrivecastNav(navController: NavHostController) {
+    val container = LocalAppContainer.current
     var startDest by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {

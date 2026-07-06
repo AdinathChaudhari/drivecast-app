@@ -4,6 +4,7 @@ import android.content.Context
 import coil.ImageLoader
 import com.drivecast.tv.api.TokenInterceptor
 import com.drivecast.tv.data.Discovery
+import com.drivecast.tv.data.KeepAwakeController
 import com.drivecast.tv.data.LibraryRepository
 import com.drivecast.tv.data.ServerConfigStore
 import com.drivecast.tv.data.TokenHolder
@@ -38,6 +39,8 @@ class AppContainer(context: Context) {
     val discovery = Discovery()
 
     val repository = LibraryRepository(okHttp, json, tokenHolder)
+
+    val keepAwake = KeepAwakeController(repository)
 
     val imageLoader: ImageLoader = ImageLoader.Builder(context.applicationContext)
         .okHttpClient(okHttp)

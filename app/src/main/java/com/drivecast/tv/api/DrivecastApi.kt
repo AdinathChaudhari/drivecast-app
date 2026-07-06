@@ -35,4 +35,17 @@ interface DrivecastApi {
 
     @POST("api/progress")
     suspend fun progress(@Body body: ProgressBody): OkResponse
+
+    // ---- keep-awake ("Are you still watching?") ----
+
+    @GET("api/awake/status")
+    suspend fun awakeStatus(): AwakeStatus
+
+    /** User said yes: restart a fresh 120s grace window. */
+    @POST("api/awake/extend")
+    suspend fun awakeExtend(): AwakeStatus
+
+    /** User said no: release the power assertion immediately. */
+    @POST("api/awake/release")
+    suspend fun awakeRelease(): AwakeStatus
 }

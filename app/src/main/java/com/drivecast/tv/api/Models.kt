@@ -133,3 +133,16 @@ data class ProgressBody(
 data class OkResponse(
     val ok: Boolean = false,
 )
+
+/**
+ * Keep-awake status from the server's macOS power-assertion manager.
+ * phase is one of "active" | "grace" | "prompt" | "idle"; secondsLeft is the
+ * countdown within the current grace/prompt window (null when idle/active).
+ */
+@Serializable
+data class AwakeStatus(
+    val active: Int = 0,
+    val holding: Boolean = false,
+    val phase: String? = null,
+    @SerialName("seconds_left") val secondsLeft: Double? = null,
+)
