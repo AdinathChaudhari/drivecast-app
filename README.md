@@ -1,7 +1,7 @@
 # drivecast for Fire TV
 
-A native Android TV / Amazon Fire TV client for a [drivecast](https://github.com/) media
-server. It's a pure HTTP client: it browses your server's library, plays video over the
+A native Android TV / Amazon Fire TV client for a
+[drivecast](https://github.com/AdinathChaudhari/drivecast) media server. It's a pure HTTP client: it browses your server's library, plays video over the
 server's range-aware stream endpoint, tracks watch progress, resumes where you left off,
 and autoplays the next episode — all from your couch with the remote.
 
@@ -74,10 +74,13 @@ To build the APK yourself:
 ### 2b. Sideload with the Downloader app (no computer needed)
 
 1. On the Fire TV, install **Downloader** from the Amazon Appstore.
-2. Host `app-debug.apk` somewhere the Fire TV can reach over HTTP (a local web server, a
-   shared drive link, etc.).
-3. Open Downloader, enter the URL to the APK, and let it download.
-4. When prompted, choose **Install**. (This is why "Apps from Unknown Sources" must be on.)
+2. Get the APK somewhere the Fire TV can reach over HTTP: grab it from this repo's
+   [Releases page](https://github.com/AdinathChaudhari/drivecast-app/releases) if one is
+   published, or host your own build (any local web server works — e.g. from the repo:
+   `python3 -m http.server 8000 -d app/build/outputs/apk/debug/` and use
+   `http://<your-computer-ip>:8000/app-debug.apk`).
+3. Open Downloader, enter the APK's URL, and let it download.
+4. Choose **Install** when prompted. (This is why "Apps from Unknown Sources" must be on.)
 
 ## Building from source
 
