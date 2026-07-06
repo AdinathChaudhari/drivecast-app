@@ -74,13 +74,17 @@ To build the APK yourself:
 ### 2b. Sideload with the Downloader app (no computer needed)
 
 1. On the Fire TV, install **Downloader** from the Amazon Appstore.
-2. Get the APK somewhere the Fire TV can reach over HTTP: grab it from this repo's
-   [Releases page](https://github.com/AdinathChaudhari/drivecast-app/releases) if one is
-   published, or host your own build (any local web server works — e.g. from the repo:
-   `python3 -m http.server 8000 -d app/build/outputs/apk/debug/` and use
-   `http://<your-computer-ip>:8000/app-debug.apk`).
-3. Open Downloader, enter the APK's URL, and let it download.
-4. Choose **Install** when prompted. (This is why "Apps from Unknown Sources" must be on.)
+2. Open Downloader and enter the latest release APK's URL:
+
+   ```
+   github.com/AdinathChaudhari/drivecast-app/releases/latest/download/drivecast-app.apk
+   ```
+
+3. Let it download, then choose **Install** when prompted. (This is why "Apps from
+   Unknown Sources" must be on.)
+4. Prefer your own build? Host it on any HTTP server the Fire TV can reach — e.g. from the
+   repo: `python3 -m http.server 8000 -d app/build/outputs/apk/debug/` and enter
+   `http://<your-computer-ip>:8000/app-debug.apk` in Downloader instead.
 
 ## Building from source
 
