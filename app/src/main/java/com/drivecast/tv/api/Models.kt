@@ -1,0 +1,135 @@
+package com.drivecast.tv.api
+
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+
+/**
+ * DTOs for the drivecast HTTP API. Every field is nullable with a default so a
+ * partial or evolving server response never crashes deserialization
+ * (the Json parser is also configured with ignoreUnknownKeys + coerceInputValues).
+ */
+
+@Serializable
+data class Ping(
+    val app: String? = null,
+    val remote: Boolean? = null,
+    val version: String? = null,
+)
+
+@Serializable
+data class RemoteUrl(
+    val label: String? = null,
+    val url: String? = null,
+)
+
+@Serializable
+data class RemoteInfo(
+    val enabled: Boolean = false,
+    val token: String? = null,
+    val port: Int? = null,
+    val urls: List<RemoteUrl> = emptyList(),
+)
+
+@Serializable
+data class LibraryResponse(
+    val titles: List<Title> = emptyList(),
+    @SerialName("generated_at") val generatedAt: Double? = null,
+    val scanning: Boolean = false,
+    @SerialName("selected_drives") val selectedDrives: List<String> = emptyList(),
+)
+
+@Serializable
+data class Title(
+    val id: String = "",
+    val type: String? = null,               // "movie" | "show"
+    val title: String? = null,
+    val year: Int? = null,
+    val poster: String? = null,
+    val overview: String? = null,
+    val quality: String? = null,
+    val section: String? = null,
+    val category: String? = null,
+    @SerialName("added_at") val addedAt: Double? = null,
+    // Movie-only fields
+    @SerialName("file_id") val fileId: String? = null,
+    val size: Long? = null,
+    @SerialName("duration_ms") val durationMs: Long? = null,
+    // Show-only field
+    val seasons: List<Season> = emptyList(),
+) {
+    val isShow: Boolean get() = type == "show" || seasons.isNotEmpty()
+    val displayTitle: String get() = title?.ifBlank { null } ?: "Untitled"
+}
+
+@Serializable
+data class Season(
+    val season: Int? = null,
+    val episodes: List<Episode> = emptyList(),
+)
+
+@Serializable
+data class Episode(
+    val title: String? = null,
+    val episode: Int? = null,
+    @SerialName("file_id") val fileId: String? = null,
+    val name: String? = null,
+    @SerialName("duration_ms") val durationMs: Long? = null,
+    val size: Long? = null,
+    @SerialName("parent_id") val parentId: String? = null,
+)
+
+@Serializable
+data class ContinueResponse(
+    val items: List<ContinueItem> = emptyList(),
+)
+
+@Serializable
+data class ContinueItem(
+    @SerialName("file_id") val fileId: String = "",
+    val name: String? = null,
+    val position: Double = 0.0,
+    val duration: Double? = null,
+    val percent: Double = 0.0,
+    val watched: Boolean = false,
+    @SerialName("last_played") val lastPlayed: Double? = null,
+    // Enriched from the owning library title
+    val title: String? = null,
+    @SerialName("title_id") val titleId: String? = null,
+    val type: String? = null,
+    val poster: String? = null,
+    val section: String? = null,
+) {
+    val displayName: String get() = title?.ifBlank { null } ?: name?.ifBlank { null } ?: "Untitled"
+}
+
+@Serializable
+data class RemoveResponse(
+    val ok: Boolean = false,
+    val removed: Boolean = false,
+)
+
+@Serializable
+data class WatchedMap(
+    val map: Map<String, Double> = emptyMap(),
+    val progress: Map<String, WatchedProgress> = emptyMap(),
+)
+
+@Serializable
+data class WatchedProgress(
+    val percent: Double = 0.0,
+    val watched: Boolean = false,
+)
+
+@Serializable
+data class ProgressBody(
+    @SerialName("file_id") val fileId: String,
+    val name: String? = null,
+    val position: Double,
+    val duration: Double? = null,
+    val ended: Boolean = false,
+)
+
+@Serializable
+data class OkResponse(
+    val ok: Boolean = false,
+)
