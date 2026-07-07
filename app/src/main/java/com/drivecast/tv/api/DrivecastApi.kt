@@ -21,6 +21,9 @@ interface DrivecastApi {
     @GET("api/library")
     suspend fun library(): LibraryResponse
 
+    @GET("api/sections")
+    suspend fun sections(): SectionsResponse
+
     @GET("api/title/{id}")
     suspend fun title(@Path("id") id: String): Response<Title>
 

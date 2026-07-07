@@ -31,6 +31,25 @@ data class RemoteInfo(
 )
 
 @Serializable
+data class SectionsResponse(
+    val sections: List<SectionInfo> = emptyList(),
+)
+
+@Serializable
+data class SectionInfo(
+    val key: String = "",
+    val label: String? = null,
+    val icon: String? = null,
+    // "continue" is a Kotlin keyword; map the JSON field explicitly.
+    @SerialName("continue") val continueLabel: String? = null,
+    val lib: String? = null,
+    val empty: String? = null,
+    // Optional per-section vocabulary (courses -> Module/Lesson, etc.).
+    val season: String? = null,
+    val episode: String? = null,
+)
+
+@Serializable
 data class LibraryResponse(
     val titles: List<Title> = emptyList(),
     @SerialName("generated_at") val generatedAt: Double? = null,
