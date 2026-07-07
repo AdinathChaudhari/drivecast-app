@@ -11,12 +11,17 @@ Built with Kotlin, Jetpack Compose for TV (`androidx.tv`), and Media3 / ExoPlaye
 
 - **Setup / pairing** — scans your local network for the server, or lets you type its IP,
   then validates the access token.
-- **Home** — a "Continue Watching" shelf (with progress bars and a dismiss action) plus one
-  shelf per library section, with posters.
+- **Home** — a tabbed, tiled layout that mirrors the web UI: section tabs (Entertainment,
+  Courses, …) across the top, a section-scoped "Continue Watching" row, a category filter
+  (All / Movies / TV Shows / Documentaries / …) on Entertainment, and a poster-tile grid —
+  no more one long scroll.
 - **Detail** — movie play / start-over; for shows, season tabs and an episode list with
   watched and in-progress markers.
-- **Player** — resumes from your last position, sideloads subtitles when the server has them,
-  reports progress back to the server, and offers a cancelable "Up next" autoplay.
+- **Player** — hands playback to **VLC** by default when it's installed (its software
+  decoders cover formats this Fire TV's hardware decoder rejects); resumes from your last
+  position, sideloads subtitles when the server has them, reports progress back to the
+  server, and offers a cancelable "Up next" autoplay. Falls back to the built-in ExoPlayer
+  when VLC isn't installed.
 
 ## Requirements
 
@@ -24,6 +29,9 @@ Built with Kotlin, Jetpack Compose for TV (`androidx.tv`), and Media3 / ExoPlaye
   drivecast). That screen shows the server's access **token** — you'll need it to pair.
 - The Fire TV and the server on the **same local network** (for auto-discovery; you can also
   type the server's IP manually).
+- **Optional but recommended: VLC** (`org.videolan.vlc`), installed from the Amazon Appstore.
+  When present, it becomes the default player for wider codec support; the built-in player is
+  used automatically when it isn't installed.
 
 ## Pairing flow
 

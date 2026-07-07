@@ -23,9 +23,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-/** One entry in the playback queue (a movie, or the ordered episodes of a show). */
-private data class QueueItem(val fileId: String, val name: String?, val durationMs: Long?)
-
 /** Autoplay banner state: the next episode's name and the seconds remaining. */
 data class UpNext(val title: String, val secondsLeft: Int)
 
@@ -72,15 +69,8 @@ class PlayerViewModel(
 
     private suspend fun bootstrap() {
         val title = runCatching { repo.title(titleId) }.getOrNull()
-        queue = when {
-            title == null -> listOf(QueueItem(startFileId, null, null))
-            title.isShow -> title.seasons
-                .flatMap { it.episodes }
-                .mapNotNull { ep -> ep.fileId?.let { QueueItem(it, ep.name ?: ep.title, ep.durationMs) } }
-                .ifEmpty { listOf(QueueItem(startFileId, title.title, null)) }
-            else -> listOf(QueueItem(startFileId, title.title, title.durationMs))
-        }
-        currentIndex = queue.indexOfFirst { it.fileId == startFileId }.let { if (it < 0) 0 else it }
+        queue = PlaybackQueue.build(title, startFileId)
+        currentIndex = PlaybackQueue.startIndex(queue, startFileId)
         progressMap = runCatching { repo.watchedMap().progress }.getOrDefault(emptyMap())
         prepareCurrent(honorResume = !startOver)
     }
@@ -107,17 +97,9 @@ class PlayerViewModel(
         player.setMediaItem(builder.build())
         player.prepare()
 
-        val resumeMs = if (honorResume) resumeMsFor(item) else 0L
+        val resumeMs = if (honorResume) PlaybackQueue.resumeMsFor(item, progressMap) else 0L
         if (resumeMs > 0) player.seekTo(resumeMs)
         player.playWhenReady = true
-    }
-
-    /** Resume position in ms from the server's stored percent, when in the 1..90% band. */
-    private fun resumeMsFor(item: QueueItem): Long {
-        val percent = progressMap[item.fileId]?.percent ?: 0.0
-        val durationMs = item.durationMs ?: return 0L
-        if (percent <= 1.0 || percent >= 90.0) return 0L
-        return (percent / 100.0 * durationMs).toLong()
     }
 
     private fun startTicker() {

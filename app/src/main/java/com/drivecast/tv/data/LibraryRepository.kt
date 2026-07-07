@@ -6,19 +6,18 @@ import com.drivecast.tv.api.DrivecastApi
 import com.drivecast.tv.api.LibraryResponse
 import com.drivecast.tv.api.ProgressBody
 import com.drivecast.tv.api.RemoteInfo
+import com.drivecast.tv.api.SectionInfo
 import com.drivecast.tv.api.Title
 import com.drivecast.tv.api.WatchedMap
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import retrofit2.Retrofit
-
-/** One horizontal shelf on Home: a section name and the titles under it. */
-data class SectionRow(val name: String, val titles: List<Title>)
 
 /** A probed subtitle track: the streamable URL plus the MIME the player needs. */
 data class SubtitleTrack(val url: String, val mimeType: String)
@@ -39,6 +38,10 @@ class LibraryRepository(
 
     @Volatile
     var lastLibrary: LibraryResponse? = null
+        private set
+
+    @Volatile
+    var lastSections: List<SectionInfo> = emptyList()
         private set
 
     fun configure(baseUrl: String, token: String) {
@@ -70,6 +73,19 @@ class LibraryRepository(
 
     fun subtitleUrl(fileId: String): String = "${requireBase()}/api/subtitles/$fileId"
 
+    // ---- URLs handed to an external player (VLC), which never passes through
+    // the OkHttp TokenInterceptor, so the token must be baked into the URL. ----
+
+    fun authorizedStreamUrl(fileId: String): String = withToken(streamUrl(fileId))
+
+    fun authorizedSubtitleUrl(fileId: String): String = withToken(subtitleUrl(fileId))
+
+    private fun withToken(url: String): String {
+        val token = tokenHolder.token
+        if (token.isNullOrBlank()) return url
+        return url.toHttpUrl().newBuilder().addQueryParameter("token", token).build().toString()
+    }
+
     // ---- reads ----
 
     /** Validate a pairing by hitting /api/remote. 200 = ok, 403 = remote off, 401 = bad token. */
@@ -81,6 +97,13 @@ class LibraryRepository(
         val lib = requireApi().library()
         lastLibrary = lib
         lib
+    }
+
+    /** Section metadata (labels, icons, per-section vocabulary) for the tabbed home. */
+    suspend fun sections(): List<SectionInfo> = withContext(Dispatchers.IO) {
+        val list = requireApi().sections().sections
+        lastSections = list
+        list
     }
 
     suspend fun continueWatching(): List<ContinueItem> = withContext(Dispatchers.IO) {
@@ -103,21 +126,6 @@ class LibraryRepository(
     suspend fun awakeExtend(): AwakeStatus = withContext(Dispatchers.IO) { requireApi().awakeExtend() }
 
     suspend fun awakeRelease(): AwakeStatus = withContext(Dispatchers.IO) { requireApi().awakeRelease() }
-
-    /** Group the library's titles into ordered section shelves. */
-    fun sectionsFrom(lib: LibraryResponse): List<SectionRow> {
-        val order = mutableListOf<String>()
-        val buckets = linkedMapOf<String, MutableList<Title>>()
-        for (t in lib.titles) {
-            val section = (t.section ?: "entertainment").ifBlank { "entertainment" }
-            if (section !in buckets) {
-                buckets[section] = mutableListOf()
-                order.add(section)
-            }
-            buckets.getValue(section).add(t)
-        }
-        return order.map { SectionRow(prettySection(it), buckets.getValue(it)) }
-    }
 
     // ---- writes ----
 
@@ -169,11 +177,6 @@ class LibraryRepository(
         "text/vtt" -> "text/vtt"
         "text/x-ssa", "application/x-ass", "text/x-ass" -> "text/x-ssa"
         else -> "application/x-subrip"
-    }
-
-    private fun prettySection(section: String): String = when (section) {
-        "entertainment" -> "Movies & Shows"
-        else -> section.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
     }
 }
 
