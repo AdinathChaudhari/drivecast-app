@@ -21,7 +21,15 @@ object PlaybackQueue {
             .flatMap { it.episodes }
             .mapNotNull { ep -> ep.fileId?.let { QueueItem(it, ep.name ?: ep.title, ep.durationMs) } }
             .ifEmpty { listOf(QueueItem(startFileId, title.title, null)) }
-        else -> listOf(QueueItem(startFileId, title.title, title.durationMs))
+        startFileId == title.fileId ->
+            listOf(QueueItem(startFileId, title.title, title.durationMs))
+        // A featurette/extra clip: use ITS own name + duration (not the film's)
+        // so resume + progress reporting are correct. Single item, so playback
+        // never auto-advances into another clip or the feature.
+        else -> title.extras.flatMap { it.episodes }
+            .firstOrNull { it.fileId == startFileId }
+            ?.let { listOf(QueueItem(startFileId, it.name ?: it.title, it.durationMs)) }
+            ?: listOf(QueueItem(startFileId, title.title, title.durationMs))
     }
 
     /** Index of the requested start file in the queue, or 0 if it isn't found. */

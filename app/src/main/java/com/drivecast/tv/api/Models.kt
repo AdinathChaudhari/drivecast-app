@@ -75,6 +75,9 @@ data class Title(
     @SerialName("duration_ms") val durationMs: Long? = null,
     // Show-only field
     val seasons: List<Season> = emptyList(),
+    // Movie-only: labelled groups of bonus clips (featurettes/extras/...).
+    // Reuses the Season shape; does NOT feed isShow (movies keep seasons empty).
+    val extras: List<Season> = emptyList(),
 ) {
     val isShow: Boolean get() = type == "show" || seasons.isNotEmpty()
     val displayTitle: String get() = title?.ifBlank { null } ?: "Untitled"
@@ -83,6 +86,10 @@ data class Title(
 @Serializable
 data class Season(
     val season: Int? = null,
+    // Pseudo-season label (e.g. "Featurettes", "Featurettes · Season 2").
+    val name: String? = null,
+    // Marks an extras pseudo-season (bonus material, not a real season).
+    val extras: Boolean = false,
     val episodes: List<Episode> = emptyList(),
 )
 

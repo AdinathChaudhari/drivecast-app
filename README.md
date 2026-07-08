@@ -15,7 +15,8 @@ Built with Kotlin, Jetpack Compose for TV (`androidx.tv`), and Media3 / ExoPlaye
   Courses, …) across the top, a section-scoped "Continue Watching" row, a category filter
   (All / Movies / TV Shows / Documentaries / …) on Entertainment, and a poster-tile grid —
   no more one long scroll.
-- **Detail** — movie play / start-over; for shows, season tabs and an episode list with
+- **Detail** — movie play / start-over (plus an **Extras** section listing any featurettes /
+  bonus clips, each played as a single item); for shows, season tabs and an episode list with
   watched and in-progress markers.
 - **Player** — hands playback to **VLC** by default when it's installed (its software
   decoders cover formats this Fire TV's hardware decoder rejects); resumes from your last
