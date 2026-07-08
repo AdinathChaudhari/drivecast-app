@@ -116,6 +116,7 @@ private fun DetailContent(
                 ShowSeasons(title, progress, onPlay)
             } else {
                 MovieActions(title, onPlay)
+                MovieExtras(title, progress, onPlay)
             }
         }
     }
@@ -131,6 +132,41 @@ private fun MovieActions(title: Title, onPlay: (String, String, Boolean) -> Unit
     Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         Button(onClick = { onPlay(title.id, fileId, false) }) { Text("Play") }
         Button(onClick = { onPlay(title.id, fileId, true) }) { Text("Start Over") }
+    }
+}
+
+@Composable
+private fun MovieExtras(
+    title: Title,
+    progress: Map<String, WatchedProgress>,
+    onPlay: (String, String, Boolean) -> Unit,
+) {
+    val groups = title.extras.filter { it.episodes.isNotEmpty() }
+    if (groups.isEmpty()) return
+    Spacer(Modifier.height(24.dp))
+    TvLazyColumn(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        groups.forEach { group ->
+            item {
+                Text(
+                    group.name ?: "Extras",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = TextPrimary,
+                    modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
+                )
+            }
+            items(group.episodes) { episode ->
+                EpisodeRow(
+                    episode = episode,
+                    watched = episode.fileId?.let { progress[it]?.watched } ?: false,
+                    percent = episode.fileId?.let { progress[it]?.percent } ?: 0.0,
+                    // Single clip: play just this featurette, no queue.
+                    onClick = { episode.fileId?.let { onPlay(title.id, it, false) } },
+                )
+            }
+        }
     }
 }
 
@@ -151,7 +187,8 @@ private fun ShowSeasons(
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         seasons.forEachIndexed { index, season ->
             Button(onClick = { selected = index }) {
-                Text("Season ${season.season ?: (index + 1)}")
+                // Honour a pseudo-season label ("Featurettes") when present.
+                Text(season.name ?: "Season ${season.season ?: (index + 1)}")
             }
         }
     }
