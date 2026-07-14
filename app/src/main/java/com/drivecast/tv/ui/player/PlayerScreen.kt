@@ -65,6 +65,8 @@ fun PlayerScreen(
     titleId: String,
     fileId: String,
     startOver: Boolean,
+    shuffle: Boolean,
+    seed: Long,
     onExit: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -75,11 +77,13 @@ fun PlayerScreen(
             titleId = titleId,
             fileId = fileId,
             startOver = startOver,
+            shuffle = shuffle,
+            seed = seed,
             onExit = onExit,
             onVlcUnavailable = { useVlc = false },
         )
     } else {
-        InternalPlayerScreen(titleId, fileId, startOver, onExit)
+        InternalPlayerScreen(titleId, fileId, startOver, shuffle, seed, onExit)
     }
 }
 
@@ -90,12 +94,14 @@ private fun VlcPlayerHost(
     titleId: String,
     fileId: String,
     startOver: Boolean,
+    shuffle: Boolean,
+    seed: Long,
     onExit: () -> Unit,
     onVlcUnavailable: () -> Unit,
 ) {
     val container = LocalAppContainer.current
     val vm: ExternalPlayerViewModel = viewModel(
-        factory = ExternalPlayerViewModel.factory(container, titleId, fileId, startOver)
+        factory = ExternalPlayerViewModel.factory(container, titleId, fileId, startOver, shuffle, seed)
     )
     val state by vm.ui.collectAsStateWithLifecycle()
 
@@ -203,12 +209,14 @@ private fun InternalPlayerScreen(
     titleId: String,
     fileId: String,
     startOver: Boolean,
+    shuffle: Boolean,
+    seed: Long,
     onExit: () -> Unit,
 ) {
     val container = LocalAppContainer.current
     val app = LocalContext.current.applicationContext as Application
     val vm: PlayerViewModel = viewModel(
-        factory = PlayerViewModel.factory(app, container, titleId, fileId, startOver)
+        factory = PlayerViewModel.factory(app, container, titleId, fileId, startOver, shuffle, seed)
     )
     val state by vm.ui.collectAsStateWithLifecycle()
 

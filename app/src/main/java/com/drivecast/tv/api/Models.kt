@@ -172,3 +172,29 @@ data class AwakeStatus(
     val phase: String? = null,
     @SerialName("seconds_left") val secondsLeft: Double? = null,
 )
+
+@Serializable
+data class PlaylistResponse(
+    @SerialName("title_id") val titleId: String? = null,
+    val items: List<PlaylistItem> = emptyList(),
+)
+
+@Serializable
+data class PlaylistItem(
+    @SerialName("file_id") val fileId: String = "",
+    val name: String? = null,
+    @SerialName("duration_ms") val durationMs: Long? = null,
+)
+
+@Serializable
+data class StreamRecent(
+    val now: Double? = null,
+    val items: List<StreamActivity> = emptyList(),
+)
+
+@Serializable
+data class StreamActivity(
+    @SerialName("file_id") val fileId: String = "",
+    val ts: Double? = null,
+    val age: Double? = null,
+)

@@ -70,4 +70,6 @@ dependencies {
 
     implementation(libs.coil.compose)
     implementation(libs.androidx.datastore.preferences)
+
+    testImplementation(libs.junit)
 }
