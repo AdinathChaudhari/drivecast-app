@@ -39,6 +39,8 @@ class PlayerViewModel(
     private val titleId: String,
     private val startFileId: String,
     private val startOver: Boolean,
+    private val shuffle: Boolean,
+    private val seed: Long,
 ) : AndroidViewModel(app) {
 
     private val repo = container.repository
@@ -69,10 +71,10 @@ class PlayerViewModel(
 
     private suspend fun bootstrap() {
         val title = runCatching { repo.title(titleId) }.getOrNull()
-        queue = PlaybackQueue.build(title, startFileId)
-        currentIndex = PlaybackQueue.startIndex(queue, startFileId)
+        queue = PlaybackQueue.build(title, startFileId, shuffle, seed)
+        currentIndex = PlaybackQueue.startIndex(queue, startFileId, shuffle)
         progressMap = runCatching { repo.watchedMap().progress }.getOrDefault(emptyMap())
-        prepareCurrent(honorResume = !startOver)
+        prepareCurrent(honorResume = !startOver && !shuffle)
     }
 
     private suspend fun prepareCurrent(honorResume: Boolean) {
@@ -236,10 +238,12 @@ class PlayerViewModel(
             titleId: String,
             fileId: String,
             startOver: Boolean,
+            shuffle: Boolean,
+            seed: Long,
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                PlayerViewModel(app, container, titleId, fileId, startOver) as T
+                PlayerViewModel(app, container, titleId, fileId, startOver, shuffle, seed) as T
         }
     }
 }

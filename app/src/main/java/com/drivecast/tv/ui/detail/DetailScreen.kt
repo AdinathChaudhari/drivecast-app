@@ -20,6 +20,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.drivecast.tv.LocalAppContainer
@@ -30,22 +31,28 @@ import com.drivecast.tv.ui.common.PosterCard
 import com.drivecast.tv.ui.theme.Accent
 import com.drivecast.tv.ui.theme.Background
 import com.drivecast.tv.ui.theme.ErrorRed
+import com.drivecast.tv.ui.theme.OnAccent
 import com.drivecast.tv.ui.theme.SurfaceVariant
 import com.drivecast.tv.ui.theme.TextPrimary
 import com.drivecast.tv.ui.theme.TextSecondary
 import androidx.tv.foundation.lazy.list.TvLazyColumn
+import androidx.tv.foundation.lazy.list.TvLazyRow
 import androidx.tv.foundation.lazy.list.items
+import androidx.tv.foundation.lazy.list.itemsIndexed
+import androidx.tv.foundation.lazy.list.rememberTvLazyListState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.tv.material3.Button
+import androidx.tv.material3.ButtonDefaults
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Surface
 import androidx.tv.material3.SurfaceDefaults
 import androidx.tv.material3.Text
+import kotlin.random.Random
 
 @Composable
 fun DetailScreen(
     titleId: String,
-    onPlay: (titleId: String, fileId: String, startOver: Boolean) -> Unit,
+    onPlay: (titleId: String, fileId: String, startOver: Boolean, shuffle: Boolean, seed: Long) -> Unit,
 ) {
     val container = LocalAppContainer.current
     var loading by remember { mutableStateOf(true) }
@@ -83,7 +90,7 @@ private fun DetailContent(
     title: Title,
     progress: Map<String, WatchedProgress>,
     posterUrl: (String?) -> String?,
-    onPlay: (String, String, Boolean) -> Unit,
+    onPlay: (String, String, Boolean, Boolean, Long) -> Unit,
 ) {
     Row(Modifier.fillMaxSize().padding(48.dp)) {
         PosterCard(
@@ -123,15 +130,15 @@ private fun DetailContent(
 }
 
 @Composable
-private fun MovieActions(title: Title, onPlay: (String, String, Boolean) -> Unit) {
+private fun MovieActions(title: Title, onPlay: (String, String, Boolean, Boolean, Long) -> Unit) {
     val fileId = title.fileId
     if (fileId == null) {
         Text("This title has no playable file.", color = ErrorRed)
         return
     }
     Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        Button(onClick = { onPlay(title.id, fileId, false) }) { Text("Play") }
-        Button(onClick = { onPlay(title.id, fileId, true) }) { Text("Start Over") }
+        Button(onClick = { onPlay(title.id, fileId, false, false, 0L) }) { Text("Play") }
+        Button(onClick = { onPlay(title.id, fileId, true, false, 0L) }) { Text("Start Over") }
     }
 }
 
@@ -139,7 +146,7 @@ private fun MovieActions(title: Title, onPlay: (String, String, Boolean) -> Unit
 private fun MovieExtras(
     title: Title,
     progress: Map<String, WatchedProgress>,
-    onPlay: (String, String, Boolean) -> Unit,
+    onPlay: (String, String, Boolean, Boolean, Long) -> Unit,
 ) {
     val groups = title.extras.filter { it.episodes.isNotEmpty() }
     if (groups.isEmpty()) return
@@ -163,7 +170,7 @@ private fun MovieExtras(
                     watched = episode.fileId?.let { progress[it]?.watched } ?: false,
                     percent = episode.fileId?.let { progress[it]?.percent } ?: 0.0,
                     // Single clip: play just this featurette, no queue.
-                    onClick = { episode.fileId?.let { onPlay(title.id, it, false) } },
+                    onClick = { episode.fileId?.let { onPlay(title.id, it, false, false, 0L) } },
                 )
             }
         }
@@ -174,7 +181,7 @@ private fun MovieExtras(
 private fun ShowSeasons(
     title: Title,
     progress: Map<String, WatchedProgress>,
-    onPlay: (String, String, Boolean) -> Unit,
+    onPlay: (String, String, Boolean, Boolean, Long) -> Unit,
 ) {
     val seasons = title.seasons.filter { it.episodes.isNotEmpty() }
     if (seasons.isEmpty()) {
@@ -183,29 +190,66 @@ private fun ShowSeasons(
     }
     var selected by remember { mutableIntStateOf(0) }
     val current = seasons[selected.coerceIn(0, seasons.lastIndex)]
+    val listState = rememberTvLazyListState()
 
-    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        seasons.forEachIndexed { index, season ->
-            Button(onClick = { selected = index }) {
-                // Honour a pseudo-season label ("Featurettes") when present.
-                Text(season.name ?: "Season ${season.season ?: (index + 1)}")
+    LaunchedEffect(selected) { listState.scrollToItem(0) }
+
+    Column(Modifier.fillMaxSize()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Button(onClick = {
+                val firstFileId = title.seasons.filterNot { it.extras }
+                    .flatMap { it.episodes }.firstNotNullOfOrNull { it.fileId }
+                if (firstFileId != null) {
+                    onPlay(title.id, firstFileId, true, true, Random.nextLong(0, Long.MAX_VALUE))
+                }
+            }) { Text("Shuffle") }
+            Spacer(Modifier.width(12.dp))
+            TvLazyRow(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                itemsIndexed(seasons) { index, season ->
+                    SeasonPill(
+                        // Honour a pseudo-season label ("Featurettes") when present.
+                        label = season.name ?: "Season ${season.season ?: (index + 1)}",
+                        selected = index == selected.coerceIn(0, seasons.lastIndex),
+                        onFocused = { selected = index },
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+
+        TvLazyColumn(
+            state = listState,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth().weight(1f),
+        ) {
+            items(current.episodes) { episode ->
+                EpisodeRow(
+                    episode = episode,
+                    watched = episode.fileId?.let { progress[it]?.watched } ?: false,
+                    percent = episode.fileId?.let { progress[it]?.percent } ?: 0.0,
+                    onClick = { episode.fileId?.let { onPlay(title.id, it, false, false, 0L) } },
+                )
             }
         }
     }
-    Spacer(Modifier.height(16.dp))
+}
 
-    TvLazyColumn(
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.fillMaxWidth(),
+@Composable
+private fun SeasonPill(label: String, selected: Boolean, onFocused: () -> Unit) {
+    val colors = if (selected) {
+        ButtonDefaults.colors(containerColor = Accent, contentColor = OnAccent)
+    } else {
+        ButtonDefaults.colors()
+    }
+    Button(
+        onClick = onFocused,
+        colors = colors,
+        modifier = Modifier.onFocusChanged { if (it.isFocused) onFocused() },
     ) {
-        items(current.episodes) { episode ->
-            EpisodeRow(
-                episode = episode,
-                watched = episode.fileId?.let { progress[it]?.watched } ?: false,
-                percent = episode.fileId?.let { progress[it]?.percent } ?: 0.0,
-                onClick = { episode.fileId?.let { onPlay(title.id, it, false) } },
-            )
-        }
+        Text(label, maxLines = 1)
     }
 }
 
