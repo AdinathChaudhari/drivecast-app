@@ -150,7 +150,9 @@ private fun HomeContent(
     val tabIndex = selectedTab.coerceIn(0, (tabs.size - 1).coerceAtLeast(0))
     val section = tabs.getOrNull(tabIndex)
     val sectionKey = section?.key ?: ENTERTAINMENT
-    val isEntertainment = sectionKey == ENTERTAINMENT
+    // Branch on the server-declared behavior, not the key; fall back to the key
+    // for legacy servers that predate the behaviors refactor.
+    val isEntertainment = section?.behavior?.let { it == ENTERTAINMENT } ?: (sectionKey == ENTERTAINMENT)
 
     // Category filter (entertainment tab only). null == "All".
     var selectedCat by remember(tabIndex) { mutableStateOf<String?>(null) }
@@ -199,6 +201,11 @@ private fun HomeContent(
         }
 
         Spacer(Modifier.height(16.dp))
+
+        if (tabs.isEmpty()) {
+            NoTabsMessage(Modifier.weight(1f))
+            return@Column
+        }
 
         TvLazyVerticalGrid(
             columns = TvGridCells.Adaptive(160.dp),
@@ -261,7 +268,7 @@ private fun sectionKeyOf(title: Title): String =
 private fun sectionKeyOf(item: ContinueItem): String =
     (item.section ?: ENTERTAINMENT).ifBlank { ENTERTAINMENT }
 
-/** The tab set: one per section that has titles (entertainment always shown), in server order. */
+/** The tab set: one per section that has titles, in server order. May be empty. */
 private fun buildTabs(
     bySection: Map<String, List<Title>>,
     sectionInfos: List<SectionInfo>,
@@ -274,7 +281,7 @@ private fun buildTabs(
 
     fun consider(key: String) {
         if (key in seen) return
-        if (key == ENTERTAINMENT || bySection[key]?.isNotEmpty() == true) {
+        if (bySection[key]?.isNotEmpty() == true) {
             result += info(key)
             seen += key
         }
@@ -282,7 +289,6 @@ private fun buildTabs(
 
     sectionInfos.forEach { consider(it.key) }
     bySection.keys.forEach { consider(it) }
-    if (ENTERTAINMENT !in seen) result.add(0, info(ENTERTAINMENT))
     return result
 }
 
@@ -494,5 +500,17 @@ private fun CenterMessage(message: String, onRetry: () -> Unit) {
             Spacer(Modifier.height(16.dp))
             Button(onClick = onRetry) { Text("Retry") }
         }
+    }
+}
+
+/** Shown when the server has zero tabs (a fresh install with no sections created yet). */
+@Composable
+private fun NoTabsMessage(modifier: Modifier = Modifier) {
+    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Text(
+            "No tabs yet — create one in drivecast on your Mac, then assign drives to it.",
+            color = TextSecondary,
+            style = MaterialTheme.typography.titleMedium,
+        )
     }
 }
