@@ -47,6 +47,9 @@ data class SectionInfo(
     // Optional per-section vocabulary (courses -> Module/Lesson, etc.).
     val season: String? = null,
     val episode: String? = null,
+    // Which content-type this tab renders like ("entertainment" | "courses" |
+    // "podcasts" | a plugin key). Null on legacy servers that predate behaviors.
+    val behavior: String? = null,
 )
 
 @Serializable
