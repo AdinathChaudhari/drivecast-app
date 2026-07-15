@@ -6,6 +6,7 @@ import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.Path
+import retrofit2.http.Query
 
 /**
  * Retrofit interface for the drivecast JSON endpoints. Discovery (/api/ping) and
@@ -51,4 +52,17 @@ interface DrivecastApi {
     /** User said no: release the power assertion immediately. */
     @POST("api/awake/release")
     suspend fun awakeRelease(): AwakeStatus
+
+    // ---- playlist hand-off (VLC playlist Next/Prev) ----
+
+    @GET("api/playlist/{id}")
+    suspend fun playlist(
+        @Path("id") id: String,
+        @Query("start") start: String? = null,
+        @Query("shuffle") shuffle: Int? = null,
+        @Query("seed") seed: Long? = null,
+    ): PlaylistResponse
+
+    @GET("api/stream/recent")
+    suspend fun streamRecent(): StreamRecent
 }

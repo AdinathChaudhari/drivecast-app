@@ -3,7 +3,8 @@
 A native Android TV / Amazon Fire TV client for a
 [drivecast](https://github.com/AdinathChaudhari/drivecast) media server. It's a pure HTTP client: it browses your server's library, plays video over the
 server's range-aware stream endpoint, tracks watch progress, resumes where you left off,
-and autoplays the next episode — all from your couch with the remote.
+and plays a show as a continuous playlist so the next episode is one button away — all
+from your couch with the remote.
 
 Built with Kotlin, Jetpack Compose for TV (`androidx.tv`), and Media3 / ExoPlayer.
 
@@ -16,13 +17,16 @@ Built with Kotlin, Jetpack Compose for TV (`androidx.tv`), and Media3 / ExoPlaye
   (All / Movies / TV Shows / Documentaries / …) on Entertainment, and a poster-tile grid —
   no more one long scroll.
 - **Detail** — movie play / start-over (plus an **Extras** section listing any featurettes /
-  bonus clips, each played as a single item); for shows, season tabs and an episode list with
-  watched and in-progress markers.
+  bonus clips, each played as a single item); for shows, a **scrollable season rail** (so a
+  show with many seasons never hides its episodes) over an episode list with watched and
+  in-progress markers, plus a **Shuffle** button that plays the whole show in random order.
 - **Player** — hands playback to **VLC** by default when it's installed (its software
-  decoders cover formats this Fire TV's hardware decoder rejects); resumes from your last
-  position, sideloads subtitles when the server has them, reports progress back to the
-  server, and offers a cancelable "Up next" autoplay. Falls back to the built-in ExoPlayer
-  when VLC isn't installed.
+  decoders cover formats this Fire TV's hardware decoder rejects). For a show it hands VLC a
+  **playlist** of the remaining episodes, so VLC's own **Next / Previous** buttons walk
+  through the season — the next episode is already primed. It resumes from your last position,
+  sideloads subtitles when the server has them, reports progress back to the server, and still
+  offers a cancelable "Up next" autoplay. Falls back to the built-in ExoPlayer when VLC isn't
+  installed.
 
 ## Requirements
 

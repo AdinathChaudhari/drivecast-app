@@ -4,9 +4,11 @@ import com.drivecast.tv.api.AwakeStatus
 import com.drivecast.tv.api.ContinueItem
 import com.drivecast.tv.api.DrivecastApi
 import com.drivecast.tv.api.LibraryResponse
+import com.drivecast.tv.api.PlaylistItem
 import com.drivecast.tv.api.ProgressBody
 import com.drivecast.tv.api.RemoteInfo
 import com.drivecast.tv.api.SectionInfo
+import com.drivecast.tv.api.StreamRecent
 import com.drivecast.tv.api.Title
 import com.drivecast.tv.api.WatchedMap
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
@@ -80,6 +82,21 @@ class LibraryRepository(
 
     fun authorizedSubtitleUrl(fileId: String): String = withToken(subtitleUrl(fileId))
 
+    /** The m3u playlist URL VLC expands into a real in-player playlist. Built manually (not via Retrofit). */
+    fun playlistUrl(titleId: String, startFileId: String?, shuffle: Boolean = false, seed: Long = 0L): String {
+        val b = requireBase().toHttpUrl().newBuilder()
+            .addPathSegment("api").addPathSegment("playlist").addPathSegment("$titleId.m3u")
+        if (startFileId != null) b.addQueryParameter("start", startFileId)
+        if (shuffle) {
+            b.addQueryParameter("shuffle", "1")
+            b.addQueryParameter("seed", seed.toString())
+        }
+        return b.build().toString()
+    }
+
+    fun authorizedPlaylistUrl(titleId: String, startFileId: String?, shuffle: Boolean = false, seed: Long = 0L) =
+        withToken(playlistUrl(titleId, startFileId, shuffle, seed))
+
     private fun withToken(url: String): String {
         val token = tokenHolder.token
         if (token.isNullOrBlank()) return url
@@ -118,6 +135,18 @@ class LibraryRepository(
         val resp = requireApi().title(id)
         if (resp.isSuccessful) resp.body() else null
     }
+
+    /** The JSON twin of [playlistUrl]/[authorizedPlaylistUrl] — used to learn the server's canonical episode order. */
+    suspend fun playlistItems(
+        titleId: String,
+        startFileId: String?,
+        shuffle: Boolean = false,
+        seed: Long? = null,
+    ): List<PlaylistItem> = withContext(Dispatchers.IO) {
+        requireApi().playlist(titleId, startFileId, if (shuffle) 1 else null, seed).items
+    }
+
+    suspend fun streamRecent(): StreamRecent = withContext(Dispatchers.IO) { requireApi().streamRecent() }
 
     // ---- keep-awake ("Are you still watching?") ----
 
