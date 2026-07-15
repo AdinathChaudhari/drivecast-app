@@ -25,6 +25,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.drivecast.tv.LocalAppContainer
 import com.drivecast.tv.api.Episode
+import com.drivecast.tv.api.SectionInfo
 import com.drivecast.tv.api.Title
 import com.drivecast.tv.api.WatchedProgress
 import com.drivecast.tv.ui.common.PosterCard
@@ -80,7 +81,8 @@ fun DetailScreen(
             error != null || title == null -> Box(Modifier.fillMaxSize(), Alignment.Center) {
                 Text(error ?: "Title not found.", color = ErrorRed)
             }
-            else -> DetailContent(title!!, progress, container.repository::posterUrl, onPlay)
+            else -> DetailContent(title!!, progress, container.repository::posterUrl,
+                container.repository.lastSections, onPlay)
         }
     }
 }
@@ -90,8 +92,12 @@ private fun DetailContent(
     title: Title,
     progress: Map<String, WatchedProgress>,
     posterUrl: (String?) -> String?,
+    // Sections carry per-behavior vocabulary (a course tab -> Module/Lesson).
+    // lastSections is already populated by Home's fetch, so no extra call.
+    sections: List<SectionInfo>,
     onPlay: (String, String, Boolean, Boolean, Long) -> Unit,
 ) {
+    val vocab = sections.find { it.key == title.section }
     Row(Modifier.fillMaxSize().padding(48.dp)) {
         PosterCard(
             title = title.displayTitle,
@@ -120,10 +126,10 @@ private fun DetailContent(
             Spacer(Modifier.height(24.dp))
 
             if (title.isShow) {
-                ShowSeasons(title, progress, onPlay)
+                ShowSeasons(title, progress, vocab, onPlay)
             } else {
                 MovieActions(title, onPlay)
-                MovieExtras(title, progress, onPlay)
+                MovieExtras(title, progress, vocab, onPlay)
             }
         }
     }
@@ -146,6 +152,7 @@ private fun MovieActions(title: Title, onPlay: (String, String, Boolean, Boolean
 private fun MovieExtras(
     title: Title,
     progress: Map<String, WatchedProgress>,
+    vocab: SectionInfo?,
     onPlay: (String, String, Boolean, Boolean, Long) -> Unit,
 ) {
     val groups = title.extras.filter { it.episodes.isNotEmpty() }
@@ -169,6 +176,7 @@ private fun MovieExtras(
                     episode = episode,
                     watched = episode.fileId?.let { progress[it]?.watched } ?: false,
                     percent = episode.fileId?.let { progress[it]?.percent } ?: 0.0,
+                    episodeWord = vocab?.episode ?: "Episode",
                     // Single clip: play just this featurette, no queue.
                     onClick = { episode.fileId?.let { onPlay(title.id, it, false, false, 0L) } },
                 )
@@ -181,6 +189,7 @@ private fun MovieExtras(
 private fun ShowSeasons(
     title: Title,
     progress: Map<String, WatchedProgress>,
+    vocab: SectionInfo?,
     onPlay: (String, String, Boolean, Boolean, Long) -> Unit,
 ) {
     val seasons = title.seasons.filter { it.episodes.isNotEmpty() }
@@ -190,6 +199,8 @@ private fun ShowSeasons(
     }
     var selected by remember { mutableIntStateOf(0) }
     val current = seasons[selected.coerceIn(0, seasons.lastIndex)]
+    // A course tab renders "Module N" / "Lesson N"; default is Season/Episode.
+    val seasonWord = vocab?.season ?: "Season"
     val listState = rememberTvLazyListState()
 
     LaunchedEffect(selected) { listState.scrollToItem(0) }
@@ -211,7 +222,7 @@ private fun ShowSeasons(
                 itemsIndexed(seasons) { index, season ->
                     SeasonPill(
                         // Honour a pseudo-season label ("Featurettes") when present.
-                        label = season.name ?: "Season ${season.season ?: (index + 1)}",
+                        label = season.name ?: "$seasonWord ${season.season ?: (index + 1)}",
                         selected = index == selected.coerceIn(0, seasons.lastIndex),
                         onFocused = { selected = index },
                     )
@@ -230,6 +241,7 @@ private fun ShowSeasons(
                     episode = episode,
                     watched = episode.fileId?.let { progress[it]?.watched } ?: false,
                     percent = episode.fileId?.let { progress[it]?.percent } ?: 0.0,
+                    episodeWord = vocab?.episode ?: "Episode",
                     onClick = { episode.fileId?.let { onPlay(title.id, it, false, false, 0L) } },
                 )
             }
@@ -258,13 +270,14 @@ private fun EpisodeRow(
     episode: Episode,
     watched: Boolean,
     percent: Double,
+    episodeWord: String,
     onClick: () -> Unit,
 ) {
     Button(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = episode.episode?.let { "%d. ".format(it) }.orEmpty() +
-                    (episode.title?.ifBlank { null } ?: episode.name?.ifBlank { null } ?: "Episode"),
+                    (episode.title?.ifBlank { null } ?: episode.name?.ifBlank { null } ?: episodeWord),
                 color = TextPrimary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
