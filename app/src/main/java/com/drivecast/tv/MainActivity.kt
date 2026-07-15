@@ -99,7 +99,7 @@ private fun DrivecastNav(navController: NavHostController) {
         composable("home") {
             HomeScreen(
                 onOpenTitle = { titleId -> navController.navigate("detail/$titleId") },
-                onPlay = { titleId, fileId -> navController.navigate("player/$titleId/$fileId/false") },
+                onPlay = { titleId, fileId -> navController.navigate("player/$titleId/$fileId/false/false/0") },
             )
         }
         composable(
@@ -109,24 +109,30 @@ private fun DrivecastNav(navController: NavHostController) {
             val titleId = entry.arguments?.getString("titleId").orEmpty()
             DetailScreen(
                 titleId = titleId,
-                onPlay = { t, f, over -> navController.navigate("player/$t/$f/$over") },
+                onPlay = { t, f, over, sh, sd -> navController.navigate("player/$t/$f/$over/$sh/$sd") },
             )
         }
         composable(
-            route = "player/{titleId}/{fileId}/{startOver}",
+            route = "player/{titleId}/{fileId}/{startOver}/{shuffle}/{seed}",
             arguments = listOf(
                 navArgument("titleId") { type = NavType.StringType },
                 navArgument("fileId") { type = NavType.StringType },
                 navArgument("startOver") { type = NavType.BoolType },
+                navArgument("shuffle") { type = NavType.BoolType },
+                navArgument("seed") { type = NavType.LongType },
             ),
         ) { entry ->
             val titleId = entry.arguments?.getString("titleId").orEmpty()
             val fileId = entry.arguments?.getString("fileId").orEmpty()
             val startOver = entry.arguments?.getBoolean("startOver") ?: false
+            val shuffle = entry.arguments?.getBoolean("shuffle") ?: false
+            val seed = entry.arguments?.getLong("seed") ?: 0L
             PlayerScreen(
                 titleId = titleId,
                 fileId = fileId,
                 startOver = startOver,
+                shuffle = shuffle,
+                seed = seed,
                 onExit = { navController.popBackStack() },
             )
         }

@@ -36,7 +36,7 @@ drivecast's server exposes a clean HTTP surface:
 That means the TV app needed **zero video infrastructure**. It is a pure API
 client: browse JSON, point a player at `/stream/{id}`, report progress.
 
-Only two small endpoints were added to the server for the TV's sake:
+A handful of small endpoints were added to the server for the TV's sake:
 
 - `GET /api/ping` — an unauthenticated "is a drivecast server here?" probe, so
   the app can find the Mac by scanning the local network (TVs don't have
@@ -46,6 +46,16 @@ Only two small endpoints were added to the server for the TV's sake:
   OpenSubtitles), but only handed them to local players as file paths. This
   endpoint serves the same resolved file over HTTP so remote players can use
   it. No format conversion needed — ExoPlayer parses SRT/VTT/ASS natively.
+- `GET /api/playlist/{title_id}.m3u` (and a JSON twin) — an ordered M3U of a
+  show's remaining episodes with token-baked stream URLs. Handing VLC this
+  playlist instead of a single URL is what makes VLC's native **Next / Previous**
+  work. It takes `?start=<file_id>` (that episode onward) and
+  `?shuffle=1&seed=<n>` (a deterministic reorder shared bit-for-bit with the
+  app, so the two agree on order).
+- `GET /api/stream/recent` — reports which files were most recently streamed.
+  VLC hands back the *playlist* URL on exit, not the episode it stopped on, so
+  the app reads this to attribute your stop-position to the right episode and
+  keep Continue Watching honest.
 
 ## What the app is made of
 
@@ -76,7 +86,12 @@ season/episode list with watched checkmarks) → **Player**.
    makes, so the Mac, your phone, and the TV all share one Continue Watching
    shelf. Dismiss a tile on the TV and it disappears on the web too.
 5. When an episode ends, a 5-second "Up next" overlay counts down to the next
-   episode (cancelable with the remote).
+   episode (cancelable with the remote). When playback is handed to VLC, the app
+   hands it the whole `/api/playlist/{id}.m3u` instead of a single file, so VLC's
+   own **Next / Previous** buttons walk the season and the next episode is
+   already loaded. The **Shuffle** button on a show plays the same playlist in a
+   seeded-random order — the app and server derive that order from the same seed,
+   so VLC's shuffled playlist and the app's queue never disagree.
 6. **Still-watching handshake.** The Mac has to be awake to relay bytes, so the
    server holds a macOS power assertion while a stream is active and, after ~2
    minutes with no bytes flowing, opens a 30-second window before letting the

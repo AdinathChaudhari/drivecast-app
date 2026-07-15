@@ -208,9 +208,9 @@ private fun HomeContent(
         }
 
         TvLazyVerticalGrid(
-            columns = TvGridCells.Adaptive(160.dp),
+            columns = TvGridCells.Adaptive(120.dp),
             contentPadding = PaddingValues(start = 48.dp, end = 48.dp, bottom = 48.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp),
             modifier = Modifier.fillMaxSize().weight(1f),
         ) {
@@ -350,12 +350,12 @@ private fun LibraryTile(
     posterUrl: String?,
     onClick: () -> Unit,
 ) {
-    Column(Modifier.width(160.dp)) {
+    Column(Modifier.width(120.dp)) {
         PosterCard(
             title = title.displayTitle,
             posterUrl = posterUrl,
             onClick = onClick,
-            width = 160,
+            width = 120,
         ) {
             if (isEntertainment && title.isShow) {
                 TileBadge("TV", Modifier.align(Alignment.TopStart).padding(6.dp))
@@ -422,6 +422,7 @@ private fun ContinueCard(
         title = item.displayName,
         posterUrl = posterUrl,
         onClick = onClick,
+        width = 112,
         modifier = Modifier.onKeyEvent { e ->
             val native = e.nativeKeyEvent
             when {
