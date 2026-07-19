@@ -17,6 +17,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -78,6 +79,7 @@ fun PosterCard(
     modifier: Modifier = Modifier,
     widthDp: Dp = 150.dp,
     aspect: Float = 2f / 3f,
+    onFocused: (() -> Unit)? = null,
     overlay: @Composable BoxScope.() -> Unit = {},
 ) {
     val imageLoader = LocalAppContainer.current.imageLoader
@@ -99,7 +101,9 @@ fun PosterCard(
         glow = CardDefaults.glow(
             focusedGlow = Glow(elevationColor = Accent.copy(alpha = 0.35f), elevation = 14.dp),
         ),
-        modifier = modifier.width(widthDp),
+        modifier = modifier
+            .width(widthDp)
+            .onFocusChanged { if (it.isFocused) onFocused?.invoke() },
     ) {
         Box(
             modifier = Modifier
