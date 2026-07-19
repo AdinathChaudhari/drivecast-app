@@ -4,4 +4,10 @@
         <item name="android:windowBackground">@android:color/black</item>
         <item name="android:colorBackground">@android:color/black</item>
     </style>
+
+    <style name="Theme.Drivecast.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">#0E1116</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/banner</item>
+        <item name="postSplashScreenTheme">@style/Theme.Drivecast</item>
+    </style>
 </resources>
