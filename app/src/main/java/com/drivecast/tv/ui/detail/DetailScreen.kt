@@ -2,9 +2,13 @@ package com.drivecast.tv.ui.detail
 
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -14,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -23,18 +28,27 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.drivecast.tv.LocalAppContainer
 import com.drivecast.tv.api.Episode
 import com.drivecast.tv.api.SectionInfo
 import com.drivecast.tv.api.Title
 import com.drivecast.tv.api.WatchedProgress
-import com.drivecast.tv.ui.common.PosterCard
+import com.drivecast.tv.ui.common.PosterFallback
 import com.drivecast.tv.ui.common.SkeletonBox
 import com.drivecast.tv.ui.common.StatusView
 import com.drivecast.tv.ui.theme.Accent
@@ -51,6 +65,8 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.animateFloat
 import com.drivecast.tv.ui.common.tvFocusRestorer
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -158,42 +174,141 @@ private fun DetailContent(
     onPlay: (String, String, Boolean, Boolean, Long) -> Unit,
 ) {
     val vocab = sections.find { it.key == title.section }
-    Row(Modifier.fillMaxSize().padding(48.dp)) {
-        PosterCard(
-            title = title.displayTitle,
-            posterUrl = posterUrl(title.poster),
-            onClick = {},
-            widthDp = 220.dp,
-            // Inert: a dead first focus target with zero action. One less node for the D-pad
-            // focus search to consider.
-            modifier = Modifier.focusProperties { canFocus = false },
-        )
-        Spacer(Modifier.width(40.dp))
-        Column(Modifier.fillMaxHeight().weight(1f)) {
-            Text(title.displayTitle, style = MaterialTheme.typography.displaySmall, color = TextPrimary)
-            Spacer(Modifier.height(6.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                title.year?.let { Text(it.toString(), color = TextSecondary) }
-                title.quality?.let { Text(it, color = TextSecondary) }
+    Column(Modifier.fillMaxSize()) {
+        DetailHero(title = title, posterUrl = posterUrl(title.poster)) {
+            // Movies get their Play/Start Over row inline in the hero, where Play's
+            // deterministic focus (WI-11) lands. Shows keep Shuffle + season selection
+            // in their own header row below the hero, unchanged from WI-11.
+            if (!title.isShow) MovieActions(title, onPlay)
+        }
+        Column(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 48.dp)) {
+            if (title.isShow) {
+                ShowSeasons(title, progress, vocab, onPlay)
+            } else {
+                MovieExtras(title, progress, vocab, onPlay)
             }
-            Spacer(Modifier.height(16.dp))
+        }
+    }
+}
+
+/**
+ * Full-bleed backdrop hero (JetStream recipe): a Ken-Burns-idle poster image occupying the top
+ * ~65% of the screen, scrimmed with a bottom vertical gradient (readability under the content
+ * column) and a left horizontal gradient (readability behind the text column), both fading into
+ * the Background token — not pure black — so the image dissolves into the UI. The content column
+ * sits bottom-left inside the 48dp/27dp overscan safe zone. Requests the exact same URL + pixel
+ * size (960x540) that home's cards/backdrop already requested, so Coil's cache (WI-02) makes it
+ * appear during the nav enter-fade — a faked shared-element transition at zero new cost.
+ */
+@Composable
+private fun DetailHero(
+    title: Title,
+    posterUrl: String?,
+    actions: @Composable () -> Unit,
+) {
+    val imageLoader = LocalAppContainer.current.imageLoader
+    val context = LocalContext.current
+
+    // Imperceptible as "animation" but keeps the hero feeling alive while idle. Pure
+    // graphicsLayer scale — RenderThread-cheap, never recomposes.
+    val kenBurns = rememberInfiniteTransition(label = "kenBurns")
+    val scale by kenBurns.animateFloat(
+        initialValue = 1f,
+        targetValue = 1.06f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(25_000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "kenBurnsScale",
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .fillMaxHeight(0.65f)
+            .drawWithContent {
+                drawContent()
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(Color.Transparent, Background),
+                        startY = size.height * 0.4f,
+                        endY = size.height,
+                    ),
+                )
+                drawRect(
+                    brush = Brush.horizontalGradient(
+                        colors = listOf(Background, Color.Transparent),
+                        startX = 0f,
+                        endX = size.width * 0.5f,
+                    ),
+                )
+            },
+    ) {
+        if (posterUrl != null) {
+            val request = remember(posterUrl) {
+                ImageRequest.Builder(context)
+                    .data(posterUrl)
+                    .size(960, 540)
+                    .build()
+            }
+            AsyncImage(
+                model = request,
+                imageLoader = imageLoader,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer { scaleX = scale; scaleY = scale },
+            )
+        } else {
+            PosterFallback(title = title.displayTitle, modifier = Modifier.fillMaxSize())
+        }
+
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(start = 48.dp, end = 48.dp, bottom = 27.dp),
+        ) {
+            Text(
+                text = title.displayTitle,
+                color = TextPrimary,
+                style = MaterialTheme.typography.displayLarge.copy(
+                    shadow = Shadow(
+                        color = Color.Black.copy(alpha = 0.5f),
+                        offset = Offset(0f, 2f),
+                        blurRadius = 8f,
+                    ),
+                ),
+            )
+            val meta = remember(title) {
+                buildList {
+                    title.year?.let { add(it.toString()) }
+                    title.quality?.let { add(it) }
+                    if (title.isShow) {
+                        val episodeCount = title.seasons.filterNot { it.extras }.sumOf { it.episodes.size }
+                        if (episodeCount > 0) {
+                            add(if (episodeCount == 1) "1 episode" else "$episodeCount episodes")
+                        }
+                    }
+                }.joinToString(" · ")
+            }
+            if (meta.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                Text(meta, style = MaterialTheme.typography.bodyLarge, color = TextSecondary)
+            }
             title.overview?.let {
+                Spacer(Modifier.height(16.dp))
                 Text(
                     it,
                     color = TextSecondary,
                     style = MaterialTheme.typography.bodyLarge,
-                    maxLines = 5,
+                    maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = 560.dp),
                 )
             }
             Spacer(Modifier.height(24.dp))
-
-            if (title.isShow) {
-                ShowSeasons(title, progress, vocab, onPlay)
-            } else {
-                MovieActions(title, onPlay)
-                MovieExtras(title, progress, vocab, onPlay)
-            }
+            actions()
         }
     }
 }
