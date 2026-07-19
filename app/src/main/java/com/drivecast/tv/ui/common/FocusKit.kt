@@ -27,7 +27,23 @@ import androidx.compose.ui.focus.focusRestorer
  */
 @OptIn(ExperimentalComposeUiApi::class)
 fun Modifier.tvFocusRestorer(onRestoreFailed: (() -> FocusRequester)? = null): Modifier =
-    this.focusRestorer(onRestoreFailed).focusGroup()
+    this.focusRestorer {
+        // A lane fallback points at the first item of a Lazy* layout (or a tab subtree
+        // disposing during the AnimatedContent crossfade). If that node is recycled/detached
+        // at restore time, focusRestorer's internal requestFocus() throws
+        // "FocusRequester is not initialized" straight out of dispatchKeyEvent and kills the
+        // process. Request focus ourselves under a guard, then return Cancel so the restorer
+        // does not request again. Invariant preserved (a fallback is still supplied); in the
+        // normal case focus still lands on the lane's first item, and in the rare detached
+        // race the press is a harmless no-op instead of a crash.
+        val target = onRestoreFailed?.invoke() ?: FocusRequester.Default
+        if (target == FocusRequester.Default || target == FocusRequester.Cancel) {
+            target
+        } else {
+            runCatching { target.requestFocus() }
+            FocusRequester.Cancel
+        }
+    }.focusGroup()
 
 /**
  * Pins the pivot fraction used when bringing a focused child of a lazy
@@ -44,6 +60,9 @@ fun PositionFocusedItemInLazyLayout(
     val spec = remember(parentFraction) {
         object : BringIntoViewSpec {
             override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
+                // Already fully within the viewport -> don't re-pin; matches foundation's default
+                // minimal bring-into-view and keeps the focused card from animating on every step.
+                if (offset >= 0f && offset + size <= containerSize) return 0f
                 val initial = parentFraction * containerSize
                 val target = if (size <= containerSize && (containerSize - initial) < size) containerSize - size else initial
                 return offset - target

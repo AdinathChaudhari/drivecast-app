@@ -94,20 +94,20 @@ private fun DrivecastNav(navController: NavHostController, startDestination: Str
         navController = navController,
         startDestination = startDestination,
         enterTransition = {
-            fadeIn(tween(210, delayMillis = 90, easing = LinearOutSlowInEasing)) +
+            fadeIn(tween(210, easing = LinearOutSlowInEasing)) +
                 scaleIn(
                     initialScale = 0.96f,
-                    animationSpec = tween(210, delayMillis = 90, easing = LinearOutSlowInEasing),
+                    animationSpec = tween(210, easing = LinearOutSlowInEasing),
                 )
         },
         exitTransition = {
             fadeOut(tween(90, easing = FastOutLinearInEasing))
         },
         popEnterTransition = {
-            fadeIn(tween(210, delayMillis = 90, easing = LinearOutSlowInEasing)) +
+            fadeIn(tween(210, easing = LinearOutSlowInEasing)) +
                 scaleIn(
                     initialScale = 0.96f,
-                    animationSpec = tween(210, delayMillis = 90, easing = LinearOutSlowInEasing),
+                    animationSpec = tween(210, easing = LinearOutSlowInEasing),
                 )
         },
         popExitTransition = {

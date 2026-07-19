@@ -304,8 +304,8 @@ private fun HomeContent(
                 AnimatedContent(
                     targetState = tabIndex,
                     transitionSpec = {
-                        (fadeIn(tween(210, delayMillis = 90, easing = LinearOutSlowInEasing)) +
-                            scaleIn(initialScale = 0.98f, animationSpec = tween(210, delayMillis = 90))) togetherWith
+                        (fadeIn(tween(210, easing = LinearOutSlowInEasing)) +
+                            scaleIn(initialScale = 0.98f, animationSpec = tween(210))) togetherWith
                             fadeOut(tween(90, easing = FastOutLinearInEasing))
                     },
                     modifier = Modifier.fillMaxSize().weight(1f),
@@ -373,7 +373,7 @@ private fun HomeContent(
                     LazyVerticalGrid(
                         state = gridState,
                         columns = GridCells.Adaptive(160.dp),
-                        contentPadding = PaddingValues(start = 48.dp, end = 48.dp, bottom = 48.dp),
+                        contentPadding = PaddingValues(start = 48.dp, end = 48.dp, top = 8.dp, bottom = 48.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
                         // The grid is the outermost focus group: entering it from the pills (or
@@ -402,9 +402,10 @@ private fun HomeContent(
                             item(span = { GridItemSpan(maxLineSpan) }) {
                                 Column {
                                     ShelfHeader(section?.continueLabel?.ifBlank { null } ?: "Continue Watching")
-                                    Spacer(Modifier.height(8.dp))
+                                    Spacer(Modifier.height(4.dp))
                                     LazyRow(
                                         horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                        contentPadding = PaddingValues(vertical = 24.dp),
                                         modifier = Modifier
                                             .focusRequester(continueLane)
                                             .tvFocusRestorer { continueFirst },
@@ -498,7 +499,7 @@ private fun HomeBackdrop(item: () -> BackdropItem?, posterUrl: (String?) -> Stri
 
     Crossfade(
         targetState = item(),
-        animationSpec = tween(500),
+        animationSpec = tween(320),
         label = "homeBackdrop",
     ) { target ->
         val url = target?.let { posterUrl(it.poster) }
@@ -507,8 +508,8 @@ private fun HomeBackdrop(item: () -> BackdropItem?, posterUrl: (String?) -> Stri
                 val request = remember(url) {
                     ImageRequest.Builder(context)
                         .data(url)
-                        .size(480, 270)
-                        .transformations(BlurTransformation(radius = 25))
+                        .size(384, 216)
+                        .transformations(BlurTransformation(radius = 18))
                         .build()
                 }
                 AsyncImage(
