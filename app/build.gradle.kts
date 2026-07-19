@@ -55,7 +55,6 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.navigation.compose)
 
-    implementation(libs.androidx.tv.foundation)
     implementation(libs.androidx.tv.material)
 
     implementation(libs.androidx.media3.exoplayer)

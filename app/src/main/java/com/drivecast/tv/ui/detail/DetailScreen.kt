@@ -36,11 +36,12 @@ import com.drivecast.tv.ui.theme.OnAccent
 import com.drivecast.tv.ui.theme.SurfaceVariant
 import com.drivecast.tv.ui.theme.TextPrimary
 import com.drivecast.tv.ui.theme.TextSecondary
-import androidx.tv.foundation.lazy.list.TvLazyColumn
-import androidx.tv.foundation.lazy.list.TvLazyRow
-import androidx.tv.foundation.lazy.list.items
-import androidx.tv.foundation.lazy.list.itemsIndexed
-import androidx.tv.foundation.lazy.list.rememberTvLazyListState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import com.drivecast.tv.ui.common.tvFocusRestorer
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.tv.material3.Button
 import androidx.tv.material3.ButtonDefaults
@@ -158,7 +159,7 @@ private fun MovieExtras(
     val groups = title.extras.filter { it.episodes.isNotEmpty() }
     if (groups.isEmpty()) return
     Spacer(Modifier.height(24.dp))
-    TvLazyColumn(
+    LazyColumn(
         verticalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -201,7 +202,7 @@ private fun ShowSeasons(
     val current = seasons[selected.coerceIn(0, seasons.lastIndex)]
     // A course tab renders "Module N" / "Lesson N"; default is Season/Episode.
     val seasonWord = vocab?.season ?: "Season"
-    val listState = rememberTvLazyListState()
+    val listState = rememberLazyListState()
 
     LaunchedEffect(selected) { listState.scrollToItem(0) }
 
@@ -215,8 +216,8 @@ private fun ShowSeasons(
                 }
             }) { Text("Shuffle") }
             Spacer(Modifier.width(12.dp))
-            TvLazyRow(
-                modifier = Modifier.weight(1f),
+            LazyRow(
+                modifier = Modifier.weight(1f).tvFocusRestorer(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 itemsIndexed(seasons) { index, season ->
@@ -231,10 +232,10 @@ private fun ShowSeasons(
         }
         Spacer(Modifier.height(16.dp))
 
-        TvLazyColumn(
+        LazyColumn(
             state = listState,
             verticalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth().weight(1f),
+            modifier = Modifier.fillMaxWidth().weight(1f).tvFocusRestorer(),
         ) {
             items(current.episodes) { episode ->
                 EpisodeRow(

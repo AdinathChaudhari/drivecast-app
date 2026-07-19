@@ -44,12 +44,14 @@ import com.drivecast.tv.ui.theme.SurfaceVariant
 import com.drivecast.tv.ui.theme.TextPrimary
 import com.drivecast.tv.ui.theme.TextSecondary
 import kotlinx.coroutines.launch
-import androidx.tv.foundation.lazy.grid.TvGridCells
-import androidx.tv.foundation.lazy.grid.TvGridItemSpan
-import androidx.tv.foundation.lazy.grid.TvLazyVerticalGrid
-import androidx.tv.foundation.lazy.grid.items
-import androidx.tv.foundation.lazy.list.TvLazyRow
-import androidx.tv.foundation.lazy.list.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import com.drivecast.tv.ui.common.PositionFocusedItemInLazyLayout
+import com.drivecast.tv.ui.common.tvFocusRestorer
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.tv.material3.Button
 import androidx.tv.material3.ButtonDefaults
@@ -174,87 +176,95 @@ private fun HomeContent(
 
     val sectionContinue = continueItems.filter { sectionKeyOf(it) == sectionKey }
 
-    Column(Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(start = 48.dp, end = 48.dp, top = 28.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("drivecast", style = MaterialTheme.typography.headlineMedium, color = Accent)
-            Button(onClick = onRefresh) { Text("Refresh") }
-        }
-
-        if (tabs.size > 1) {
-            Spacer(Modifier.height(16.dp))
+    PositionFocusedItemInLazyLayout(0.10f) {
+        Column(Modifier.fillMaxSize()) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 48.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxWidth().padding(start = 48.dp, end = 48.dp, top = 28.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                tabs.forEachIndexed { index, tab ->
-                    PillButton(
-                        selected = index == tabIndex,
-                        label = tabLabel(tab),
-                        onClick = { selectedTab = index },
-                    )
+                Text("drivecast", style = MaterialTheme.typography.headlineMedium, color = Accent)
+                Button(onClick = onRefresh) { Text("Refresh") }
+            }
+
+            if (tabs.size > 1) {
+                Spacer(Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 48.dp).tvFocusRestorer(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    tabs.forEachIndexed { index, tab ->
+                        PillButton(
+                            selected = index == tabIndex,
+                            label = tabLabel(tab),
+                            onClick = { selectedTab = index },
+                        )
+                    }
                 }
             }
-        }
 
-        Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(16.dp))
 
-        if (tabs.isEmpty()) {
-            NoTabsMessage(Modifier.weight(1f))
-            return@Column
-        }
+            if (tabs.isEmpty()) {
+                NoTabsMessage(Modifier.weight(1f))
+                return@Column
+            }
 
-        TvLazyVerticalGrid(
-            columns = TvGridCells.Adaptive(120.dp),
-            contentPadding = PaddingValues(start = 48.dp, end = 48.dp, bottom = 48.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            modifier = Modifier.fillMaxSize().weight(1f),
-        ) {
-            if (sectionContinue.isNotEmpty()) {
-                item(span = { TvGridItemSpan(maxLineSpan) }) {
-                    Column {
-                        ShelfHeader(section?.continueLabel?.ifBlank { null } ?: "Continue Watching")
-                        Spacer(Modifier.height(8.dp))
-                        TvLazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            items(sectionContinue) { item ->
-                                ContinueCard(
-                                    item = item,
-                                    posterUrl = posterUrl(item.poster),
-                                    onClick = { onPlayContinue(item) },
-                                    onDismiss = { onDismissRequest(item) },
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(120.dp),
+                contentPadding = PaddingValues(start = 48.dp, end = 48.dp, bottom = 48.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.fillMaxSize().weight(1f),
+            ) {
+                if (sectionContinue.isNotEmpty()) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        Column {
+                            ShelfHeader(section?.continueLabel?.ifBlank { null } ?: "Continue Watching")
+                            Spacer(Modifier.height(8.dp))
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                modifier = Modifier.tvFocusRestorer(),
+                            ) {
+                                items(sectionContinue) { item ->
+                                    ContinueCard(
+                                        item = item,
+                                        posterUrl = posterUrl(item.poster),
+                                        onClick = { onPlayContinue(item) },
+                                        onDismiss = { onDismissRequest(item) },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (chips.size > 1) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.tvFocusRestorer(),
+                        ) {
+                            chips.forEach { chip ->
+                                PillButton(
+                                    selected = selectedCat == chip.category,
+                                    label = chip.label,
+                                    onClick = { selectedCat = chip.category },
                                 )
                             }
                         }
                     }
                 }
-            }
 
-            if (chips.size > 1) {
-                item(span = { TvGridItemSpan(maxLineSpan) }) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        chips.forEach { chip ->
-                            PillButton(
-                                selected = selectedCat == chip.category,
-                                label = chip.label,
-                                onClick = { selectedCat = chip.category },
-                            )
-                        }
-                    }
+                items(gridTitles, key = { it.id }) { title ->
+                    LibraryTile(
+                        title = title,
+                        section = section,
+                        isEntertainment = isEntertainment,
+                        posterUrl = posterUrl(title.poster),
+                        onClick = { onOpenTitle(title.id) },
+                    )
                 }
-            }
-
-            items(gridTitles, key = { it.id }) { title ->
-                LibraryTile(
-                    title = title,
-                    section = section,
-                    isEntertainment = isEntertainment,
-                    posterUrl = posterUrl(title.poster),
-                    onClick = { onOpenTitle(title.id) },
-                )
             }
         }
     }
