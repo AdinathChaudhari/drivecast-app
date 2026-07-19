@@ -7,6 +7,7 @@ import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -64,7 +65,6 @@ import com.drivecast.tv.ui.theme.TextPrimary
 import com.drivecast.tv.ui.theme.TextSecondary
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -77,6 +77,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.tv.material3.Button
 import androidx.tv.material3.ButtonDefaults
+import androidx.tv.material3.LocalContentColor
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Surface
 import androidx.tv.material3.SurfaceDefaults
@@ -197,22 +198,52 @@ private fun DetailContent(
     onPlay: (String, String, Boolean, Boolean, Long) -> Unit,
 ) {
     val vocab = sections.find { it.key == title.section }
-    Column(Modifier.fillMaxSize()) {
-        DetailHero(title = title, posterUrl = posterUrl(title.poster)) {
-            // Movies get their Play/Start Over row inline in the hero, where Play's
-            // deterministic focus (WI-11) lands. Shows keep Shuffle + season selection
-            // in their own header row below the hero, unchanged from WI-11.
-            if (!title.isShow) MovieActions(title, onPlay)
-        }
-        Column(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 48.dp)) {
-            if (title.isShow) {
+    if (title.isShow) {
+        // Split-pane layout: the hero's backdrop+scrim stays the screen-wide ambient background
+        // (full-bleed, not just the movie layout's top 65%), with a readability wash and the
+        // side-by-side panes (ShowSeasons) rendered OVER it, not below it — see the split-pane
+        // comment on ShowSeasons for how the panes themselves are laid out.
+        Box(Modifier.fillMaxSize()) {
+            DetailHero(title = title, posterUrl = posterUrl(title.poster), heightFraction = 1f) {}
+            Box(Modifier.fillMaxSize().background(Background.copy(alpha = 0.55f)))
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(start = 48.dp, end = 48.dp, top = 56.dp, bottom = 27.dp),
+            ) {
                 ShowSeasons(title, progress, vocab, onPlay)
-            } else {
+            }
+        }
+    } else {
+        Column(Modifier.fillMaxSize()) {
+            DetailHero(title = title, posterUrl = posterUrl(title.poster)) {
+                // Movies get their Play/Start Over row inline in the hero, where Play's
+                // deterministic focus (WI-11) lands.
+                MovieActions(title, onPlay)
+            }
+            Column(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 48.dp)) {
                 MovieExtras(title, progress, vocab, onPlay)
             }
         }
     }
 }
+
+/**
+ * The single dot-separated metadata line (year · quality · episode count) shared by [DetailHero]
+ * (movies, rendered inline in the hero) and the show split-pane's left column (Task: shows move
+ * their title/metadata out of the hero and into the left pane) — one source of truth for the
+ * format instead of two copies drifting apart.
+ */
+private fun metaLine(title: Title): String = buildList {
+    title.year?.let { add(it.toString()) }
+    title.quality?.let { add(it) }
+    if (title.isShow) {
+        val episodeCount = title.seasons.filterNot { it.extras }.sumOf { it.episodes.size }
+        if (episodeCount > 0) {
+            add(if (episodeCount == 1) "1 episode" else "$episodeCount episodes")
+        }
+    }
+}.joinToString(" · ")
 
 /**
  * Full-bleed backdrop hero (JetStream recipe): a Ken-Burns-idle poster image occupying the top
@@ -227,6 +258,10 @@ private fun DetailContent(
 private fun DetailHero(
     title: Title,
     posterUrl: String?,
+    // Movies keep the original 65%-height hero with inline title/actions; shows pass 1f so the
+    // backdrop+scrim becomes the full screen-wide ambient background behind the split-pane
+    // overlay (see DetailContent), instead of squeezing the panes into the remaining ~35%.
+    heightFraction: Float = 0.65f,
     actions: @Composable () -> Unit,
 ) {
     val imageLoader = LocalAppContainer.current.imageLoader
@@ -248,7 +283,7 @@ private fun DetailHero(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .fillMaxHeight(0.65f),
+            .fillMaxHeight(heightFraction),
     ) {
         // Image + scrims live in their own inner Box, clipped to the hero's bounds, and drawn
         // as the FIRST child — the content Column below is a later sibling, so it always paints
@@ -303,45 +338,41 @@ private fun DetailHero(
                 .align(Alignment.BottomStart)
                 .padding(start = 48.dp, end = 48.dp, bottom = 27.dp),
         ) {
-            Text(
-                text = title.displayTitle,
-                color = TextPrimary,
-                style = MaterialTheme.typography.displayLarge.copy(
-                    shadow = Shadow(
-                        color = Color.Black.copy(alpha = 0.5f),
-                        offset = Offset(0f, 2f),
-                        blurRadius = 8f,
-                    ),
-                ),
-            )
-            val meta = remember(title) {
-                buildList {
-                    title.year?.let { add(it.toString()) }
-                    title.quality?.let { add(it) }
-                    if (title.isShow) {
-                        val episodeCount = title.seasons.filterNot { it.extras }.sumOf { it.episodes.size }
-                        if (episodeCount > 0) {
-                            add(if (episodeCount == 1) "1 episode" else "$episodeCount episodes")
-                        }
-                    }
-                }.joinToString(" · ")
-            }
-            if (meta.isNotEmpty()) {
-                Spacer(Modifier.height(6.dp))
-                Text(meta, style = MaterialTheme.typography.bodyLarge, color = TextSecondary)
-            }
-            title.overview?.let {
-                Spacer(Modifier.height(16.dp))
+            // Shows move title/metadata/overview out of the hero and into the split-pane's left
+            // column (below), so the hero stays a bare backdrop+scrim ambient background for
+            // them — only movies (unchanged layout) render this text block inline. `actions()`
+            // is already a no-op for shows (gated at the DetailContent call site), so calling it
+            // unconditionally below is harmless.
+            if (!title.isShow) {
                 Text(
-                    it,
-                    color = TextSecondary,
-                    style = MaterialTheme.typography.bodyLarge,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.widthIn(max = 560.dp),
+                    text = title.displayTitle,
+                    color = TextPrimary,
+                    style = MaterialTheme.typography.displayLarge.copy(
+                        shadow = Shadow(
+                            color = Color.Black.copy(alpha = 0.5f),
+                            offset = Offset(0f, 2f),
+                            blurRadius = 8f,
+                        ),
+                    ),
                 )
+                val meta = remember(title) { metaLine(title) }
+                if (meta.isNotEmpty()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(meta, style = MaterialTheme.typography.bodyLarge, color = TextSecondary)
+                }
+                title.overview?.let {
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        it,
+                        color = TextSecondary,
+                        style = MaterialTheme.typography.bodyLarge,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = 560.dp),
+                    )
+                }
+                Spacer(Modifier.height(24.dp))
             }
-            Spacer(Modifier.height(24.dp))
             actions()
         }
     }
@@ -469,10 +500,10 @@ private fun ShowSeasons(
     LaunchedEffect(Unit) {
         if (hasRequestedResumeFocus) return@LaunchedEffect
         hasRequestedResumeFocus = true
-        // The hero occupies 65% of the screen, so only ~3-4 EpisodeRows compose in the initial
-        // viewport — for any show watched past the first few episodes, the resume row would never
-        // be composed and requestFocus() would throw and be swallowed. Scroll to it first, then
-        // wait for it to actually be laid out before requesting focus.
+        // Even with the split-pane's near-full-screen height, only the first handful of
+        // EpisodeRows compose in the initial viewport — for any show watched well into a season,
+        // the resume row would never be composed and requestFocus() would throw and be swallowed.
+        // Scroll to it first, then wait for it to actually be laid out before requesting focus.
         listState.scrollToItem(resumeIndex)
         snapshotFlow { listState.layoutInfo.visibleItemsInfo.any { it.index == resumeIndex } }
             .filter { it }
@@ -480,19 +511,73 @@ private fun ShowSeasons(
         runCatching { resumeFocus.requestFocus() }
     }
 
-    Column(Modifier.fillMaxSize()) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Button(onClick = {
-                val firstFileId = title.seasons.filterNot { it.extras }
-                    .flatMap { it.episodes }.firstNotNullOfOrNull { it.fileId }
-                if (firstFileId != null) {
-                    onPlay(title.id, firstFileId, true, true, Random.nextLong(0, Long.MAX_VALUE))
-                }
-            }) { Text("Shuffle") }
-            Spacer(Modifier.width(12.dp))
-            LazyRow(
+    // Split-pane over the (now bare, for shows) hero backdrop: a ~38%-wide left column carrying
+    // title/metadata/actions/seasons, and the remaining width for the selected season's episodes.
+    // Side-by-side focusGroups (one per pane, via tvFocusRestorer below) give D-pad LEFT/RIGHT
+    // pane-to-pane movement for free through ordinary geometric focus search — neither pane wraps
+    // itself in anything that would block that search from crossing the gap between them.
+    Row(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxHeight().weight(0.38f)) {
+            Text(
+                text = title.displayTitle,
+                color = TextPrimary,
+                // Smaller than the movie hero's displayLarge — this column is ~38% width and
+                // also has to fit metadata, actions, and the season list beneath it.
+                style = MaterialTheme.typography.headlineMedium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            val meta = remember(title) { metaLine(title) }
+            if (meta.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                Text(meta, style = MaterialTheme.typography.bodyLarge, color = TextSecondary)
+            }
+            Spacer(Modifier.height(16.dp))
+            // Play/Resume + Start Over target the SELECTED season's resume point (`current` /
+            // `resumeIndex`, computed above from `progress`), unlike Shuffle below which spans
+            // every season — so their label/visibility react to season-pill changes exactly like
+            // the episode list's own resume row does. Plain Column children (no FocusRequester,
+            // no tvFocusRestorer): the screen's deterministic initial focus stays on resumeFocus
+            // in the episode list, untouched by this stack.
+            val resumeEpisode = current.episodes.getOrNull(resumeIndex)
+            val resumeFileId = resumeEpisode?.fileId
+            val resumePercent = resumeFileId?.let { progress[it]?.percent } ?: 0.0
+            if (resumeFileId != null) {
+                Button(
+                    onClick = { onPlay(title.id, resumeFileId, false, false, 0L) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(if (resumePercent in 1.0..90.0) "Resume" else "Play") }
+                Spacer(Modifier.height(8.dp))
+            }
+            if (resumeIndex > 0 || resumePercent > 1.0) {
+                Button(
+                    onClick = {
+                        val firstFileId = current.episodes.firstNotNullOfOrNull { it.fileId }
+                        if (firstFileId != null) {
+                            onPlay(title.id, firstFileId, true, false, 0L)
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Start Over") }
+                Spacer(Modifier.height(8.dp))
+            }
+            Button(
+                onClick = {
+                    val firstFileId = title.seasons.filterNot { it.extras }
+                        .flatMap { it.episodes }.firstNotNullOfOrNull { it.fileId }
+                    if (firstFileId != null) {
+                        onPlay(title.id, firstFileId, true, true, Random.nextLong(0, Long.MAX_VALUE))
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Shuffle") }
+            Spacer(Modifier.height(16.dp))
+            // Vertical season list, same dwell/focus-driven selection as the old horizontal rail
+            // above (the snapshotFlow+collectLatest LaunchedEffect owns the 250ms debounce
+            // unchanged) — only the orientation and item width changed.
+            LazyColumn(
                 modifier = Modifier.weight(1f).tvFocusRestorer { seasonFirst },
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 itemsIndexed(seasons) { index, season ->
                     SeasonPill(
@@ -500,18 +585,21 @@ private fun ShowSeasons(
                         label = season.name ?: "$seasonWord ${season.season ?: (index + 1)}",
                         selected = index == selected.coerceIn(0, seasons.lastIndex),
                         onFocused = { focusedSeason = index },
-                        modifier = if (index == 0) Modifier.focusRequester(seasonFirst) else Modifier,
+                        modifier = Modifier.fillMaxWidth().let { m ->
+                            if (index == 0) m.focusRequester(seasonFirst) else m
+                        },
                     )
                 }
             }
         }
-        Spacer(Modifier.height(16.dp))
+
+        Spacer(Modifier.width(32.dp))
 
         // Season swaps fade (alpha-only, GPU-safe) instead of hard-cutting.
         Crossfade(
             targetState = selected,
             animationSpec = tween(220, easing = LinearOutSlowInEasing),
-            modifier = Modifier.fillMaxWidth().weight(1f),
+            modifier = Modifier.fillMaxHeight().weight(0.62f),
             label = "seasonEpisodes",
         ) { seasonIdx ->
             val season = seasons[seasonIdx.coerceIn(0, seasons.lastIndex)]
@@ -585,24 +673,56 @@ private fun EpisodeRow(
     Button(
         onClick = onClick,
         scale = ButtonDefaults.scale(focusedScale = 1.02f),
+        // Explicit focused pair instead of tv-material's inverse-surface default (a near-white
+        // container the hardcoded-white row Texts used to disappear into): white container +
+        // dark Background-token content, the same "light container -> dark content" language as
+        // SeasonPill's Accent/OnAccent pairing. Every Text below reads LocalContentColor instead
+        // of a hardcoded color, so it tracks whichever pair is active in both focus states.
+        colors = ButtonDefaults.colors(
+            containerColor = SurfaceVariant,
+            contentColor = TextPrimary,
+            focusedContainerColor = Color.White,
+            focusedContentColor = Background,
+        ),
         modifier = Modifier
             .fillMaxWidth()
             .let { m -> focusRequester?.let { m.focusRequester(it) } ?: m },
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = episode.episode?.let { "%d. ".format(it) }.orEmpty() +
-                    (episode.title?.ifBlank { null } ?: episode.name?.ifBlank { null } ?: episodeWord),
-                color = TextPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = episode.episode?.let { "%d. ".format(it) }.orEmpty() +
+                        (episode.title?.ifBlank { null } ?: episode.name?.ifBlank { null } ?: episodeWord),
+                    color = LocalContentColor.current,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                episode.durationMs?.let { ms ->
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = formatDuration(ms),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = LocalContentColor.current.copy(alpha = 0.72f),
+                        maxLines = 1,
+                    )
+                }
+            }
             Spacer(Modifier.width(12.dp))
             when {
-                watched -> Text("✓", color = Accent)
-                percent > 1.0 -> Text("${percent.toInt()}%", color = TextSecondary)
+                watched -> Text("✓", color = LocalContentColor.current)
+                percent > 1.0 -> Text(
+                    "${percent.toInt()}%",
+                    color = LocalContentColor.current.copy(alpha = 0.72f),
+                )
             }
         }
     }
+}
+
+/** "1h 5m" / "42m" — used by [EpisodeRow]'s secondary metadata line. */
+private fun formatDuration(ms: Long): String {
+    val totalMinutes = (ms / 60_000L).toInt()
+    val hours = totalMinutes / 60
+    val minutes = totalMinutes % 60
+    return if (hours > 0) "${hours}h ${minutes}m" else "${minutes}m"
 }
