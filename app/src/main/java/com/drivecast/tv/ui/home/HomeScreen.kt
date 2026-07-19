@@ -218,11 +218,22 @@ private fun HomeContent(
     // back to the first card and defeating tvFocusRestorer + the saved grid state's job of
     // returning the user to the exact card they left. rememberSaveable survives that dispose via
     // NavHost's SaveableStateProvider, so the snap happens exactly once per back-stack entry.
-    val initialFocus = remember { FocusRequester() }
+    // Focus-lane requesters, hoisted here and attached by whichever tab is active (only one tab
+    // is composed at rest). Each lane's tvFocusRestorer gets a fallback so a failed restore can
+    // never swallow the key press: worst case, focus lands on the lane's first item.
+    val pillsFirst = remember { FocusRequester() }
+    val continueLane = remember { FocusRequester() }
+    val continueFirst = remember { FocusRequester() }
+    val chipsFirst = remember { FocusRequester() }
+    val firstTile = remember { FocusRequester() }
+
+    val tab0HasShelf = remember(continueItems, tabs) {
+        tabs.firstOrNull()?.let { t -> continueItems.any { sectionKeyOf(it) == t.key } } ?: false
+    }
     var focusedOnce by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         if (!focusedOnce) {
-            runCatching { initialFocus.requestFocus() }
+            runCatching { (if (tab0HasShelf) continueFirst else firstTile).requestFocus() }
             focusedOnce = true
         }
     }
@@ -275,7 +286,8 @@ private fun HomeContent(
             if (tabs.size > 1) {
                 Spacer(Modifier.height(16.dp))
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 48.dp).tvFocusRestorer(),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 48.dp)
+                        .tvFocusRestorer { pillsFirst },
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     tabs.forEachIndexed { index, tab ->
@@ -283,6 +295,7 @@ private fun HomeContent(
                             selected = index == tabIndex,
                             label = tabLabel(tab),
                             onClick = { selectedTab = index },
+                            modifier = if (index == 0) Modifier.focusRequester(pillsFirst) else Modifier,
                         )
                     }
                 }
@@ -348,7 +361,18 @@ private fun HomeContent(
                         contentPadding = PaddingValues(start = 48.dp, end = 48.dp, bottom = 48.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        modifier = Modifier.fillMaxSize().tvFocusRestorer(),
+                        // The grid is the outermost focus group: entering it from the pills (or
+                        // from another screen) restores the last-focused card. When that card is
+                        // gone (tab rebuilt, item recycled), fall through the lanes in display
+                        // order instead of dropping the press.
+                        modifier = Modifier.fillMaxSize().tvFocusRestorer {
+                            when {
+                                sectionContinue.isNotEmpty() -> continueLane
+                                gridTitles.isNotEmpty() -> firstTile
+                                chips.size > 1 -> chipsFirst
+                                else -> FocusRequester.Default
+                            }
+                        },
                     ) {
                         if (sectionContinue.isNotEmpty()) {
                             item(span = { GridItemSpan(maxLineSpan) }) {
@@ -357,7 +381,9 @@ private fun HomeContent(
                                     Spacer(Modifier.height(8.dp))
                                     LazyRow(
                                         horizontalArrangement = Arrangement.spacedBy(16.dp),
-                                        modifier = Modifier.tvFocusRestorer(),
+                                        modifier = Modifier
+                                            .focusRequester(continueLane)
+                                            .tvFocusRestorer { continueFirst },
                                     ) {
                                         itemsIndexed(
                                             sectionContinue,
@@ -370,7 +396,7 @@ private fun HomeContent(
                                                 onClick = { onPlayContinue(item) },
                                                 onDismiss = { onDismissRequest(item) },
                                                 onFocused = { onCardFocused(BackdropItem(item.fileId, item.poster)) },
-                                                focusRequester = if (idx == 0 && i == 0) initialFocus else null,
+                                                focusRequester = if (i == 0) continueFirst else null,
                                             )
                                         }
                                     }
@@ -382,13 +408,14 @@ private fun HomeContent(
                             item(span = { GridItemSpan(maxLineSpan) }) {
                                 Row(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    modifier = Modifier.tvFocusRestorer(),
+                                    modifier = Modifier.tvFocusRestorer { chipsFirst },
                                 ) {
-                                    chips.forEach { chip ->
+                                    chips.forEachIndexed { chipIdx, chip ->
                                         PillButton(
                                             selected = selectedCat == chip.category,
                                             label = chip.label,
                                             onClick = { selectedCat = chip.category },
+                                            modifier = if (chipIdx == 0) Modifier.focusRequester(chipsFirst) else Modifier,
                                         )
                                     }
                                 }
@@ -407,11 +434,7 @@ private fun HomeContent(
                                 posterUrl = posterUrl(title.poster),
                                 onOpenTitle = onTitleClick,
                                 onFocused = { onCardFocused(BackdropItem(title.id, title.poster)) },
-                                focusRequester = if (idx == 0 && sectionContinue.isEmpty() && i == 0) {
-                                    initialFocus
-                                } else {
-                                    null
-                                },
+                                focusRequester = if (i == 0) firstTile else null,
                                 // Chip filtering removes/adds items; the remaining ones glide to
                                 // their new position instead of popping.
                                 modifier = Modifier.animateItem(
@@ -636,7 +659,12 @@ private fun TileBadge(text: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun PillButton(selected: Boolean, label: String, onClick: () -> Unit) {
+private fun PillButton(
+    selected: Boolean,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val containerColor by animateColorAsState(
         targetValue = if (selected) Accent else SurfaceVariant,
         animationSpec = tween(MotionTokens.DurationShort, easing = MotionTokens.Emphasized),
@@ -651,6 +679,7 @@ private fun PillButton(selected: Boolean, label: String, onClick: () -> Unit) {
         onClick = onClick,
         scale = ButtonDefaults.scale(focusedScale = 1.025f),
         colors = ButtonDefaults.colors(containerColor = containerColor, contentColor = contentColor),
+        modifier = modifier,
     ) { Text(label) }
 }
 
