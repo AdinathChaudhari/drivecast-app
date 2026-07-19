@@ -9,6 +9,7 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -17,6 +18,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -59,6 +61,8 @@ import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.drivecast.tv.LocalAppContainer
@@ -72,7 +76,9 @@ import com.drivecast.tv.ui.theme.Background
 import com.drivecast.tv.ui.theme.ErrorRed
 import com.drivecast.tv.ui.theme.MotionTokens
 import com.drivecast.tv.ui.theme.OnAccent
+import com.drivecast.tv.ui.theme.Outline
 import com.drivecast.tv.ui.theme.Scrim
+import com.drivecast.tv.ui.theme.Surface as SurfaceColor
 import com.drivecast.tv.ui.theme.SurfaceVariant
 import com.drivecast.tv.ui.theme.TextPrimary
 import com.drivecast.tv.ui.theme.TextSecondary
@@ -85,6 +91,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import com.drivecast.tv.ui.common.PositionFocusedItemInLazyLayout
 import com.drivecast.tv.ui.common.tvFocusRestorer
+import androidx.tv.material3.Border
 import androidx.tv.material3.Button
 import androidx.tv.material3.ButtonDefaults
 import androidx.tv.material3.IconButton
@@ -622,31 +629,75 @@ private fun DismissDialogHost(
     )
 }
 
+/**
+ * A real windowed dialog (not a plain scrim Box drawn inline): the platform window traps D-pad
+ * focus so it can never walk into the grid behind it, and dismissOnBackPress gives Back-cancel
+ * for free instead of Back falling through to exit the whole screen.
+ */
 @Composable
 private fun DismissDialog(title: String, onConfirm: () -> Unit, onCancel: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Scrim),
-        contentAlignment = Alignment.Center,
+    Dialog(
+        onDismissRequest = onCancel,
+        properties = DialogProperties(dismissOnBackPress = true, usePlatformDefaultWidth = false),
     ) {
-        Surface(
-            colors = SurfaceDefaults.colors(containerColor = SurfaceVariant),
-            modifier = Modifier.width(480.dp),
-        ) {
-            Column(Modifier.padding(28.dp)) {
-                Text(
-                    "Remove from Continue Watching?",
-                    style = MaterialTheme.typography.titleLarge,
-                    color = TextPrimary,
-                )
-                Spacer(Modifier.height(8.dp))
-                Text(title, color = TextSecondary)
-                Spacer(Modifier.height(24.dp))
-                Row {
-                    Button(onClick = onConfirm) { Text("Remove") }
-                    Spacer(Modifier.width(12.dp))
-                    Button(onClick = onCancel) { Text("Cancel") }
+        val visibleState = remember { MutableTransitionState(false) }
+        LaunchedEffect(Unit) { visibleState.targetState = true }
+        val cancelFocus = remember { FocusRequester() }
+        LaunchedEffect(Unit) { runCatching { cancelFocus.requestFocus() } }
+
+        Box(Modifier.fillMaxSize()) {
+            AnimatedVisibility(
+                visibleState = visibleState,
+                enter = fadeIn(tween(150)),
+            ) {
+                Box(Modifier.fillMaxSize().background(Scrim))
+            }
+
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                AnimatedVisibility(
+                    visibleState = visibleState,
+                    enter = fadeIn(tween(220, easing = MotionTokens.EmphasizedDecelerate)) +
+                        scaleIn(
+                            initialScale = 0.92f,
+                            animationSpec = tween(220, easing = MotionTokens.EmphasizedDecelerate),
+                        ),
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = SurfaceDefaults.colors(containerColor = SurfaceColor),
+                        border = Border(
+                            border = BorderStroke(1.dp, Outline),
+                            shape = RoundedCornerShape(16.dp),
+                        ),
+                        modifier = Modifier.width(480.dp),
+                    ) {
+                        Column(Modifier.padding(28.dp)) {
+                            Text(
+                                "Remove from Continue Watching?",
+                                style = MaterialTheme.typography.titleLarge,
+                                color = TextPrimary,
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Text(title, color = TextSecondary)
+                            Spacer(Modifier.height(24.dp))
+                            Row {
+                                Button(
+                                    onClick = onConfirm,
+                                    colors = ButtonDefaults.colors(
+                                        containerColor = ErrorRed.copy(alpha = 0.15f),
+                                        contentColor = ErrorRed,
+                                        focusedContainerColor = ErrorRed,
+                                        focusedContentColor = Color.White,
+                                    ),
+                                ) { Text("Remove") }
+                                Spacer(Modifier.width(12.dp))
+                                Button(
+                                    onClick = onCancel,
+                                    modifier = Modifier.focusRequester(cancelFocus),
+                                ) { Text("Cancel") }
+                            }
+                        }
+                    }
                 }
             }
         }
