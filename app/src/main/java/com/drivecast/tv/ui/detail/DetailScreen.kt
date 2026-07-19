@@ -533,13 +533,44 @@ private fun ShowSeasons(
                 Text(meta, style = MaterialTheme.typography.bodyLarge, color = TextSecondary)
             }
             Spacer(Modifier.height(16.dp))
-            Button(onClick = {
-                val firstFileId = title.seasons.filterNot { it.extras }
-                    .flatMap { it.episodes }.firstNotNullOfOrNull { it.fileId }
-                if (firstFileId != null) {
-                    onPlay(title.id, firstFileId, true, true, Random.nextLong(0, Long.MAX_VALUE))
-                }
-            }) { Text("Shuffle") }
+            // Play/Resume + Start Over target the SELECTED season's resume point (`current` /
+            // `resumeIndex`, computed above from `progress`), unlike Shuffle below which spans
+            // every season — so their label/visibility react to season-pill changes exactly like
+            // the episode list's own resume row does. Plain Column children (no FocusRequester,
+            // no tvFocusRestorer): the screen's deterministic initial focus stays on resumeFocus
+            // in the episode list, untouched by this stack.
+            val resumeEpisode = current.episodes.getOrNull(resumeIndex)
+            val resumeFileId = resumeEpisode?.fileId
+            val resumePercent = resumeFileId?.let { progress[it]?.percent } ?: 0.0
+            if (resumeFileId != null) {
+                Button(
+                    onClick = { onPlay(title.id, resumeFileId, false, false, 0L) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(if (resumePercent in 1.0..90.0) "Resume" else "Play") }
+                Spacer(Modifier.height(8.dp))
+            }
+            if (resumeIndex > 0 || resumePercent > 1.0) {
+                Button(
+                    onClick = {
+                        val firstFileId = current.episodes.firstNotNullOfOrNull { it.fileId }
+                        if (firstFileId != null) {
+                            onPlay(title.id, firstFileId, true, false, 0L)
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Start Over") }
+                Spacer(Modifier.height(8.dp))
+            }
+            Button(
+                onClick = {
+                    val firstFileId = title.seasons.filterNot { it.extras }
+                        .flatMap { it.episodes }.firstNotNullOfOrNull { it.fileId }
+                    if (firstFileId != null) {
+                        onPlay(title.id, firstFileId, true, true, Random.nextLong(0, Long.MAX_VALUE))
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Shuffle") }
             Spacer(Modifier.height(16.dp))
             // Vertical season list, same dwell/focus-driven selection as the old horizontal rail
             // above (the snapshotFlow+collectLatest LaunchedEffect owns the 250ms debounce
