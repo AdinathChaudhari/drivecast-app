@@ -27,6 +27,11 @@ Built with Kotlin, Jetpack Compose for TV (`androidx.tv`), and Media3 / ExoPlaye
   sideloads subtitles when the server has them, reports progress back to the server, and still
   offers a cancelable "Up next" autoplay. Falls back to the built-in ExoPlayer when VLC isn't
   installed.
+- **Feel** — a 10-foot UI built to feel first-party: one signature focus treatment on every
+  card (a slight grow, white outline, soft glow), rows that glide so the focused tile holds a
+  steady keyline, Back returning to the exact card you left, a branded splash instead of a
+  blank frame on launch, shimmer skeletons instead of spinners, an ambient backdrop that
+  settles in behind the home grid, and a full-bleed hero on the detail screen.
 
 ## Requirements
 
@@ -67,22 +72,20 @@ From a machine with the Android SDK / `adb` installed, on the same network:
 # Connect to the Fire TV (accept the on-screen "Allow USB debugging" prompt the first time)
 adb connect <fire-tv-ip>:5555
 
-# Build and install the debug APK in one step
-./gradlew installDebug
+# Build and install the release APK (recommended — R8-minified, noticeably smoother)
+./gradlew :app:assembleRelease
+adb install -r app/build/outputs/apk/release/app-release.apk
 
-# …or install a prebuilt APK directly
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+# …or the debug APK for development
+./gradlew installDebug
 ```
 
 The app appears under **Your Apps & Channels** on the Fire TV home screen. Launch it with the
 remote.
 
-To build the APK yourself:
-
-```bash
-./gradlew :app:assembleDebug
-# output: app/build/outputs/apk/debug/app-debug.apk
-```
+The release build is signed with the debug keystore on purpose: this app is sideloaded rather
+than store-distributed, so release upgrades install over previous builds without losing your
+pairing.
 
 ### 2b. Sideload with the Downloader app (no computer needed)
 
@@ -123,7 +126,9 @@ sdk.dir=/path/to/Android/sdk
 Then:
 
 ```bash
-./gradlew :app:assembleDebug
+./gradlew :app:assembleDebug      # development build
+./gradlew :app:assembleRelease    # R8-minified — what you want on the Stick
+# outputs: app/build/outputs/apk/{debug,release}/
 ```
 
 ## Project layout

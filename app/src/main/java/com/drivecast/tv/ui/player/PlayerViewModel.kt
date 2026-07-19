@@ -23,13 +23,15 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-/** Autoplay banner state: the next episode's name and the seconds remaining. */
-data class UpNext(val title: String, val secondsLeft: Int)
-
 data class PlayerUiState(
     val error: String? = null,
     val errorRetriable: Boolean = false,
-    val upNext: UpNext? = null,
+    // The up-next banner's identity/visibility only. The 1Hz countdown value lives
+    // separately in [PlayerViewModel.upNextRemaining] so the ticking second doesn't
+    // re-emit this whole state (and recompose the AndroidView update block) every second.
+    val upNextVisible: Boolean = false,
+    val nextTitle: String? = null,
+    val nextPosterUrl: String? = null,
 )
 
 @UnstableApi
@@ -56,9 +58,16 @@ class PlayerViewModel(
     private val _ui = MutableStateFlow(PlayerUiState())
     val ui: StateFlow<PlayerUiState> = _ui.asStateFlow()
 
+    // The up-next countdown, sliced out of [ui] so the 1Hz tick only recomposes the
+    // leaf that collects this flow (the countdown ring), never the screen content
+    // lambda that hosts the AndroidView(PlayerView).
+    private val _upNextRemaining = MutableStateFlow<Int?>(null)
+    val upNextRemaining: StateFlow<Int?> = _upNextRemaining.asStateFlow()
+
     private var queue: List<QueueItem> = emptyList()
     private var currentIndex = 0
     private var progressMap: Map<String, com.drivecast.tv.api.WatchedProgress> = emptyMap()
+    private var currentPosterUrl: String? = null
 
     private var tickerJob: Job? = null
     private var upNextJob: Job? = null
@@ -71,6 +80,7 @@ class PlayerViewModel(
 
     private suspend fun bootstrap() {
         val title = runCatching { repo.title(titleId) }.getOrNull()
+        currentPosterUrl = title?.poster
         queue = PlaybackQueue.build(title, startFileId, shuffle, seed)
         currentIndex = PlaybackQueue.startIndex(queue, startFileId, shuffle)
         progressMap = runCatching { repo.watchedMap().progress }.getOrDefault(emptyMap())
@@ -79,7 +89,8 @@ class PlayerViewModel(
 
     private suspend fun prepareCurrent(honorResume: Boolean) {
         retriedCurrent = false
-        _ui.value = _ui.value.copy(error = null, upNext = null)
+        _upNextRemaining.value = null
+        _ui.value = _ui.value.copy(error = null, upNextVisible = false)
         val item = queue[currentIndex]
 
         val subtitle = runCatching { repo.probeSubtitle(item.fileId) }.getOrNull()
@@ -146,14 +157,18 @@ class PlayerViewModel(
     private fun startUpNextCountdown(nextIndex: Int) {
         upNextJob?.cancel()
         val next = queue[nextIndex]
+        _ui.value = _ui.value.copy(
+            upNextVisible = true,
+            nextTitle = next.name ?: "Next",
+            nextPosterUrl = currentPosterUrl,
+        )
         upNextJob = viewModelScope.launch {
             for (seconds in 5 downTo 1) {
-                _ui.value = _ui.value.copy(
-                    upNext = UpNext(next.name ?: "Next", seconds)
-                )
+                _upNextRemaining.value = seconds
                 delay(1_000)
             }
-            _ui.value = _ui.value.copy(upNext = null)
+            _upNextRemaining.value = null
+            _ui.value = _ui.value.copy(upNextVisible = false)
             currentIndex = nextIndex
             prepareCurrent(honorResume = true)
         }
@@ -161,20 +176,20 @@ class PlayerViewModel(
 
     fun playNextNow() {
         upNextJob?.cancel()
-        val next = _ui.value.upNext ?: return
-        _ui.value = _ui.value.copy(upNext = null)
+        if (!_ui.value.upNextVisible) return
+        _upNextRemaining.value = null
+        _ui.value = _ui.value.copy(upNextVisible = false)
         val nextIndex = currentIndex + 1
         if (nextIndex in queue.indices) {
             currentIndex = nextIndex
             viewModelScope.launch { prepareCurrent(honorResume = true) }
         }
-        // Explicitly reference to keep `next` used; the countdown already showed it.
-        next.title
     }
 
     fun cancelUpNext() {
         upNextJob?.cancel()
-        _ui.value = _ui.value.copy(upNext = null)
+        _upNextRemaining.value = null
+        _ui.value = _ui.value.copy(upNextVisible = false)
     }
 
     fun retry() {
