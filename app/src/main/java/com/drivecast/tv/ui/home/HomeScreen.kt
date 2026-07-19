@@ -2,12 +2,21 @@ package com.drivecast.tv.ui.home
 
 import android.view.KeyEvent
 import androidx.activity.compose.ReportDrawnWhen
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -26,6 +35,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -36,6 +46,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -56,7 +70,9 @@ import com.drivecast.tv.ui.common.SkeletonBox
 import com.drivecast.tv.ui.theme.Accent
 import com.drivecast.tv.ui.theme.Background
 import com.drivecast.tv.ui.theme.ErrorRed
+import com.drivecast.tv.ui.theme.MotionTokens
 import com.drivecast.tv.ui.theme.OnAccent
+import com.drivecast.tv.ui.theme.Scrim
 import com.drivecast.tv.ui.theme.SurfaceVariant
 import com.drivecast.tv.ui.theme.TextPrimary
 import com.drivecast.tv.ui.theme.TextSecondary
@@ -64,13 +80,14 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import com.drivecast.tv.ui.common.PositionFocusedItemInLazyLayout
 import com.drivecast.tv.ui.common.tvFocusRestorer
 import androidx.tv.material3.Button
 import androidx.tv.material3.ButtonDefaults
+import androidx.tv.material3.IconButton
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Surface
 import androidx.tv.material3.SurfaceDefaults
@@ -162,36 +179,18 @@ private fun HomeContent(
 
     var selectedTab by remember { mutableIntStateOf(0) }
     val tabIndex = selectedTab.coerceIn(0, (tabs.size - 1).coerceAtLeast(0))
-    val section = tabs.getOrNull(tabIndex)
-    val sectionKey = section?.key ?: ENTERTAINMENT
-    // Branch on the server-declared behavior, not the key; fall back to the key
-    // for legacy servers that predate the behaviors refactor.
-    val isEntertainment = section?.behavior?.let { it == ENTERTAINMENT } ?: (sectionKey == ENTERTAINMENT)
 
-    // Category filter (entertainment tab only). null == "All".
+    // Category filter (entertainment tab only). null == "All". Resets whenever the tab changes.
     var selectedCat by remember(tabIndex) { mutableStateOf<String?>(null) }
 
-    val sectionTitles = remember(bySection, sectionKey) {
-        (bySection[sectionKey] ?: emptyList()).sortedWith(
-            compareByDescending<Title> { it.addedAt ?: Double.NEGATIVE_INFINITY }
-                .thenBy { it.displayTitle.lowercase() }
-        )
+    // Initial focus: the first Continue Watching card if the opening tab has one, else the
+    // first grid tile. HomeContent only enters composition once real data has landed (the
+    // Crossfade above gates it), so a Unit-keyed effect already fires after the real tree
+    // exists and never on the skeleton.
+    val initialFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        runCatching { initialFocus.requestFocus() }
     }
-    val chips = remember(sectionTitles, isEntertainment) {
-        if (isEntertainment) visibleChips(sectionTitles) else emptyList()
-    }
-    val gridTitles = remember(sectionTitles, selectedCat, isEntertainment) {
-        if (isEntertainment) sectionTitles.filter { matchesCategory(it, selectedCat) } else sectionTitles
-    }
-
-    val sectionContinue = remember(continueItems, sectionKey) {
-        continueItems.filter { sectionKeyOf(it) == sectionKey }
-    }
-
-    // One scroll+focus position per tab (fixes scroll carryover across tabs); rememberSaveable
-    // survives process death and, combined with tvFocusRestorer below, restores both scroll
-    // offset and the focused card on back-navigation.
-    val gridState = rememberSaveable(selectedTab, saver = LazyGridState.Saver) { LazyGridState() }
 
     PositionFocusedItemInLazyLayout(0.10f) {
         Column(Modifier.fillMaxSize()) {
@@ -207,7 +206,11 @@ private fun HomeContent(
                     Text("drivecast", style = MaterialTheme.typography.headlineMedium, color = Accent)
                     if (refreshing) RefreshIndicator()
                 }
-                Button(onClick = onRefresh) { Text("Refresh") }
+                // Demoted from a prime top-right "Refresh" button to a small icon so the
+                // wordmark + tab titles own the header's visual hierarchy.
+                IconButton(onClick = onRefresh) {
+                    Text("⟳", style = MaterialTheme.typography.titleLarge, color = TextSecondary)
+                }
             }
 
             if (tabs.size > 1) {
@@ -230,64 +233,123 @@ private fun HomeContent(
 
             if (tabs.isEmpty()) {
                 NoTabsMessage(Modifier.weight(1f))
-                return@Column
-            }
+            } else {
+                // The canonical Material fade-through between tabs: the grid state is already
+                // keyed per tab (below), so a tab switch glides instead of hard-cutting.
+                AnimatedContent(
+                    targetState = tabIndex,
+                    transitionSpec = {
+                        (fadeIn(tween(210, delayMillis = 90, easing = LinearOutSlowInEasing)) +
+                            scaleIn(initialScale = 0.98f, animationSpec = tween(210, delayMillis = 90))) togetherWith
+                            fadeOut(tween(90, easing = FastOutLinearInEasing))
+                    },
+                    modifier = Modifier.fillMaxSize().weight(1f),
+                    label = "tabContent",
+                ) { idx ->
+                    val section = tabs.getOrNull(idx)
+                    val sectionKey = section?.key ?: ENTERTAINMENT
+                    // Branch on the server-declared behavior, not the key; fall back to the key
+                    // for legacy servers that predate the behaviors refactor.
+                    val isEntertainment =
+                        section?.behavior?.let { it == ENTERTAINMENT } ?: (sectionKey == ENTERTAINMENT)
 
-            LazyVerticalGrid(
-                state = gridState,
-                columns = GridCells.Adaptive(120.dp),
-                contentPadding = PaddingValues(start = 48.dp, end = 48.dp, bottom = 48.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                modifier = Modifier.fillMaxSize().weight(1f).tvFocusRestorer(),
-            ) {
-                if (sectionContinue.isNotEmpty()) {
-                    item(span = { GridItemSpan(maxLineSpan) }) {
-                        Column {
-                            ShelfHeader(section?.continueLabel?.ifBlank { null } ?: "Continue Watching")
-                            Spacer(Modifier.height(8.dp))
-                            LazyRow(
-                                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                                modifier = Modifier.tvFocusRestorer(),
-                            ) {
-                                items(sectionContinue, key = { it.fileId }, contentType = { "continue" }) { item ->
-                                    ContinueCard(
-                                        item = item,
-                                        posterUrl = posterUrl(item.poster),
-                                        onClick = { onPlayContinue(item) },
-                                        onDismiss = { onDismissRequest(item) },
-                                    )
+                    val sectionTitles = remember(bySection, sectionKey) {
+                        (bySection[sectionKey] ?: emptyList()).sortedWith(
+                            compareByDescending<Title> { it.addedAt ?: Double.NEGATIVE_INFINITY }
+                                .thenBy { it.displayTitle.lowercase() }
+                        )
+                    }
+                    val chips = remember(sectionTitles, isEntertainment) {
+                        if (isEntertainment) visibleChips(sectionTitles) else emptyList()
+                    }
+                    val gridTitles = remember(sectionTitles, selectedCat, isEntertainment) {
+                        if (isEntertainment) sectionTitles.filter { matchesCategory(it, selectedCat) } else sectionTitles
+                    }
+                    val sectionContinue = remember(continueItems, sectionKey) {
+                        continueItems.filter { sectionKeyOf(it) == sectionKey }
+                    }
+
+                    // One scroll+focus position per tab (fixes scroll carryover across tabs);
+                    // rememberSaveable survives process death and, combined with tvFocusRestorer
+                    // below, restores both scroll offset and the focused card on back-navigation.
+                    val gridState = rememberSaveable(idx, saver = LazyGridState.Saver) { LazyGridState() }
+
+                    LazyVerticalGrid(
+                        state = gridState,
+                        columns = GridCells.Adaptive(160.dp),
+                        contentPadding = PaddingValues(start = 48.dp, end = 48.dp, bottom = 48.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        modifier = Modifier.fillMaxSize().tvFocusRestorer(),
+                    ) {
+                        if (sectionContinue.isNotEmpty()) {
+                            item(span = { GridItemSpan(maxLineSpan) }) {
+                                Column {
+                                    ShelfHeader(section?.continueLabel?.ifBlank { null } ?: "Continue Watching")
+                                    Spacer(Modifier.height(8.dp))
+                                    LazyRow(
+                                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                        modifier = Modifier.tvFocusRestorer(),
+                                    ) {
+                                        itemsIndexed(
+                                            sectionContinue,
+                                            key = { _, item -> item.fileId },
+                                            contentType = { _, _ -> "continue" },
+                                        ) { i, item ->
+                                            ContinueCard(
+                                                item = item,
+                                                posterUrl = posterUrl(item.poster),
+                                                onClick = { onPlayContinue(item) },
+                                                onDismiss = { onDismissRequest(item) },
+                                                focusRequester = if (idx == 0 && i == 0) initialFocus else null,
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
-                    }
-                }
 
-                if (chips.size > 1) {
-                    item(span = { GridItemSpan(maxLineSpan) }) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.tvFocusRestorer(),
-                        ) {
-                            chips.forEach { chip ->
-                                PillButton(
-                                    selected = selectedCat == chip.category,
-                                    label = chip.label,
-                                    onClick = { selectedCat = chip.category },
-                                )
+                        if (chips.size > 1) {
+                            item(span = { GridItemSpan(maxLineSpan) }) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.tvFocusRestorer(),
+                                ) {
+                                    chips.forEach { chip ->
+                                        PillButton(
+                                            selected = selectedCat == chip.category,
+                                            label = chip.label,
+                                            onClick = { selectedCat = chip.category },
+                                        )
+                                    }
+                                }
                             }
                         }
-                    }
-                }
 
-                items(gridTitles, key = { it.id }, contentType = { "poster" }) { title ->
-                    LibraryTile(
-                        title = title,
-                        section = section,
-                        isEntertainment = isEntertainment,
-                        posterUrl = posterUrl(title.poster),
-                        onOpenTitle = onTitleClick,
-                    )
+                        itemsIndexed(
+                            gridTitles,
+                            key = { _, title -> title.id },
+                            contentType = { _, _ -> "poster" },
+                        ) { i, title ->
+                            LibraryTile(
+                                title = title,
+                                section = section,
+                                isEntertainment = isEntertainment,
+                                posterUrl = posterUrl(title.poster),
+                                onOpenTitle = onTitleClick,
+                                focusRequester = if (idx == 0 && sectionContinue.isEmpty() && i == 0) {
+                                    initialFocus
+                                } else {
+                                    null
+                                },
+                                // Chip filtering removes/adds items; the remaining ones glide to
+                                // their new position instead of popping.
+                                modifier = Modifier.animateItem(
+                                    placementSpec = tween(300, easing = MotionTokens.Emphasized)
+                                ),
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -383,13 +445,16 @@ private fun LibraryTile(
     isEntertainment: Boolean,
     posterUrl: String?,
     onOpenTitle: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    focusRequester: FocusRequester? = null,
 ) {
-    Column(Modifier.width(120.dp)) {
+    Column(modifier.width(160.dp)) {
         PosterCard(
             title = title.displayTitle,
             posterUrl = posterUrl,
             onClick = { onOpenTitle(title.id) },
-            widthDp = 120.dp,
+            widthDp = 160.dp,
+            modifier = focusRequester?.let { Modifier.focusRequester(it) } ?: Modifier,
         ) {
             if (isEntertainment && title.isShow) {
                 TileBadge("TV", Modifier.align(Alignment.TopStart).padding(6.dp))
@@ -423,7 +488,7 @@ private fun LibraryTile(
 private fun TileBadge(text: String, modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
-            .background(Color(0xCC000000), RoundedCornerShape(4.dp))
+            .background(Scrim, RoundedCornerShape(4.dp))
             .padding(horizontal = 6.dp, vertical = 2.dp),
     ) {
         Text(text, color = TextPrimary, style = MaterialTheme.typography.labelSmall)
@@ -432,12 +497,21 @@ private fun TileBadge(text: String, modifier: Modifier = Modifier) {
 
 @Composable
 private fun PillButton(selected: Boolean, label: String, onClick: () -> Unit) {
-    val colors = if (selected) {
-        ButtonDefaults.colors(containerColor = Accent, contentColor = OnAccent)
-    } else {
-        ButtonDefaults.colors()
-    }
-    Button(onClick = onClick, colors = colors) { Text(label) }
+    val containerColor by animateColorAsState(
+        targetValue = if (selected) Accent else SurfaceVariant,
+        animationSpec = tween(MotionTokens.DurationShort, easing = MotionTokens.Emphasized),
+        label = "pillContainer",
+    )
+    val contentColor by animateColorAsState(
+        targetValue = if (selected) OnAccent else TextPrimary,
+        animationSpec = tween(MotionTokens.DurationShort, easing = MotionTokens.Emphasized),
+        label = "pillContent",
+    )
+    Button(
+        onClick = onClick,
+        scale = ButtonDefaults.scale(focusedScale = 1.025f),
+        colors = ButtonDefaults.colors(containerColor = containerColor, contentColor = contentColor),
+    ) { Text(label) }
 }
 
 @Composable
@@ -451,41 +525,79 @@ private fun ContinueCard(
     posterUrl: String?,
     onClick: () -> Unit,
     onDismiss: () -> Unit,
+    focusRequester: FocusRequester? = null,
 ) {
-    PosterCard(
-        title = item.displayName,
-        posterUrl = posterUrl,
-        onClick = onClick,
-        widthDp = 112.dp,
-        modifier = Modifier.onKeyEvent { e ->
-            val native = e.nativeKeyEvent
-            when {
-                native.keyCode == KeyEvent.KEYCODE_MENU && e.type == KeyEventType.KeyUp -> {
-                    onDismiss(); true
-                }
-                native.keyCode == KeyEvent.KEYCODE_DPAD_CENTER && native.isLongPress -> {
-                    onDismiss(); true
-                }
-                else -> false
-            }
-        },
-    ) {
-        // Progress bar overlay at the bottom of the poster.
-        val fraction = (item.percent / 100.0).coerceIn(0.0, 1.0).toFloat()
-        Box(
+    var focused by remember { mutableStateOf(false) }
+
+    Column(Modifier.width(140.dp)) {
+        PosterCard(
+            title = item.displayName,
+            posterUrl = posterUrl,
+            onClick = onClick,
+            widthDp = 140.dp,
             modifier = Modifier
-                .align(Alignment.BottomStart)
-                .fillMaxWidth()
-                .height(6.dp)
-                .background(SurfaceVariant),
+                .onFocusChanged { focused = it.isFocused }
+                .onKeyEvent { e ->
+                    val native = e.nativeKeyEvent
+                    when {
+                        native.keyCode == KeyEvent.KEYCODE_MENU && e.type == KeyEventType.KeyUp -> {
+                            onDismiss(); true
+                        }
+                        native.keyCode == KeyEvent.KEYCODE_DPAD_CENTER && native.isLongPress -> {
+                            onDismiss(); true
+                        }
+                        else -> false
+                    }
+                }
+                .let { m -> focusRequester?.let { m.focusRequester(it) } ?: m },
         ) {
+            // Progress bar overlay: a 4dp bar inset 6dp from the poster edges, rounded, on a
+            // faint track — replaces the old flush 6dp strip.
+            val fraction = (item.percent / 100.0).coerceIn(0.0, 1.0).toFloat()
             Box(
                 modifier = Modifier
-                    .fillMaxHeight()
-                    .fillMaxWidth(fraction)
-                    .background(Accent),
-            )
+                    .align(Alignment.BottomStart)
+                    .padding(6.dp)
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(Color.White.copy(alpha = 0.25f)),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .fillMaxWidth(fraction)
+                        .background(Accent),
+                )
+            }
         }
+        // Fixed-height slot so the hint fading in/out never shifts the shelf row's layout.
+        Box(Modifier.height(16.dp)) {
+            RemoveHint(visible = focused)
+        }
+    }
+}
+
+/**
+ * Discoverability for the long-press/MENU dismiss gesture on [ContinueCard], which otherwise has
+ * zero affordance. Pulled into its own function (rather than nested directly inside the
+ * Column/Box call site) so the plain top-level [AnimatedVisibility] overload resolves instead of
+ * a Column/Row/BoxScope-receiver variant.
+ */
+@Composable
+private fun RemoveHint(visible: Boolean) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(210, delayMillis = 400)),
+        exit = fadeOut(tween(90)),
+    ) {
+        Text(
+            "Hold SELECT to remove",
+            style = MaterialTheme.typography.labelSmall,
+            color = TextSecondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -515,7 +627,7 @@ private fun DismissDialog(title: String, onConfirm: () -> Unit, onCancel: () -> 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xCC000000)),
+            .background(Scrim),
         contentAlignment = Alignment.Center,
     ) {
         Surface(
