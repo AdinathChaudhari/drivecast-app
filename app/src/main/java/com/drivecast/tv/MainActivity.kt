@@ -3,17 +3,23 @@ package com.drivecast.tv
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.util.UnstableApi
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -28,18 +34,35 @@ import com.drivecast.tv.ui.player.PlayerScreen
 import com.drivecast.tv.ui.setup.SetupScreen
 import com.drivecast.tv.ui.theme.DrivecastTheme
 import kotlinx.coroutines.flow.first
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.tv.material3.Surface
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+    private var startDest by mutableStateOf<String?>(null)
+
     @UnstableApi
     override fun onCreate(savedInstanceState: Bundle?) {
+        val splash = installSplashScreen()
         super.onCreate(savedInstanceState)
+        splash.setKeepOnScreenCondition { startDest == null }
+
         val container = (application as DrivecastApp).container
+        lifecycleScope.launch {
+            val cfg = container.configStore.config.first()
+            startDest = if (cfg.isConfigured) {
+                container.repository.configure(cfg.baseUrl!!, cfg.token!!)
+                "home"
+            } else {
+                "setup"
+            }
+        }
+
         setContent {
             CompositionLocalProvider(LocalAppContainer provides container) {
                 DrivecastTheme {
-                    DrivecastRoot()
+                    val start = startDest
+                    if (start != null) {
+                        DrivecastRoot(startDestination = start)
+                    }
                 }
             }
         }
@@ -48,10 +71,10 @@ class MainActivity : ComponentActivity() {
 
 @UnstableApi
 @Composable
-private fun DrivecastRoot() {
+private fun DrivecastRoot(startDestination: String) {
     val navController = rememberNavController()
     Box(Modifier.fillMaxSize()) {
-        DrivecastNav(navController)
+        DrivecastNav(navController, startDestination)
         // Global "Are you still watching?" overlay, above every screen.
         KeepAwakeHost(
             onRequestExitPlayer = {
@@ -66,29 +89,32 @@ private fun DrivecastRoot() {
 
 @UnstableApi
 @Composable
-private fun DrivecastNav(navController: NavHostController) {
-    val container = LocalAppContainer.current
-    var startDest by remember { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(Unit) {
-        val cfg = container.configStore.config.first()
-        startDest = if (cfg.isConfigured) {
-            container.repository.configure(cfg.baseUrl!!, cfg.token!!)
-            "home"
-        } else {
-            "setup"
-        }
-    }
-
-    val start = startDest
-    if (start == null) {
-        Surface(modifier = Modifier.fillMaxSize()) {
-            Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator() }
-        }
-        return
-    }
-
-    NavHost(navController = navController, startDestination = start) {
+private fun DrivecastNav(navController: NavHostController, startDestination: String) {
+    NavHost(
+        navController = navController,
+        startDestination = startDestination,
+        enterTransition = {
+            fadeIn(tween(210, delayMillis = 90, easing = LinearOutSlowInEasing)) +
+                scaleIn(
+                    initialScale = 0.96f,
+                    animationSpec = tween(210, delayMillis = 90, easing = LinearOutSlowInEasing),
+                )
+        },
+        exitTransition = {
+            fadeOut(tween(90, easing = FastOutLinearInEasing))
+        },
+        popEnterTransition = {
+            fadeIn(tween(210, delayMillis = 90, easing = LinearOutSlowInEasing)) +
+                scaleIn(
+                    initialScale = 0.96f,
+                    animationSpec = tween(210, delayMillis = 90, easing = LinearOutSlowInEasing),
+                )
+        },
+        popExitTransition = {
+            fadeOut(tween(90, easing = FastOutLinearInEasing)) +
+                scaleOut(targetScale = 0.96f, animationSpec = tween(210))
+        },
+    ) {
         composable("setup") {
             SetupScreen(onPaired = {
                 navController.navigate("home") {
