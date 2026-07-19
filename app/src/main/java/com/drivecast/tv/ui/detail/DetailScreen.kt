@@ -585,6 +585,7 @@ private fun ShowSeasons(
                         label = season.name ?: "$seasonWord ${season.season ?: (index + 1)}",
                         selected = index == selected.coerceIn(0, seasons.lastIndex),
                         onFocused = { focusedSeason = index },
+                        onSelect = { focusedSeason = index; selected = index },
                         modifier = Modifier.fillMaxWidth().let { m ->
                             if (index == 0) m.focusRequester(seasonFirst) else m
                         },
@@ -640,6 +641,7 @@ private fun SeasonPill(
     label: String,
     selected: Boolean,
     onFocused: () -> Unit,
+    onSelect: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val containerColor by animateColorAsState(
@@ -653,7 +655,7 @@ private fun SeasonPill(
         label = "seasonPillContent",
     )
     Button(
-        onClick = onFocused,
+        onClick = onSelect,
         colors = ButtonDefaults.colors(containerColor = containerColor, contentColor = contentColor),
         modifier = modifier.onFocusChanged { if (it.isFocused) onFocused() },
     ) {
