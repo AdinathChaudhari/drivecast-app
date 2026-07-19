@@ -30,8 +30,10 @@ Built with Kotlin, Jetpack Compose for TV (`androidx.tv`), and Media3 / ExoPlaye
 - **Feel** — a 10-foot UI built to feel first-party: one signature focus treatment on every
   card (a slight grow, white outline, soft glow), rows that glide so the focused tile holds a
   steady keyline, Back returning to the exact card you left, a branded splash instead of a
-  blank frame on launch, shimmer skeletons instead of spinners, an ambient backdrop that
-  settles in behind the home grid, and a full-bleed hero on the detail screen.
+  blank frame on launch, shimmer skeletons instead of spinners, a softly blurred ambient
+  backdrop that settles in behind the home grid, and a full-bleed hero on the detail screen.
+  Every focus lane declares a fallback, so a D-pad press always moves focus on the first try —
+  even after the card it would have returned to is gone.
 
 ## Requirements
 
