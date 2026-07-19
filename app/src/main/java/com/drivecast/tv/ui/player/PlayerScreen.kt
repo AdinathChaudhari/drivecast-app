@@ -319,7 +319,6 @@ private fun ErrorOverlay(
     // Guarantee a focused action even when there's no Retry: an error is never a
     // dead end for the D-pad.
     val primaryFocus = remember { FocusRequester() }
-    LaunchedEffect(Unit) { runCatching { primaryFocus.requestFocus() } }
 
     AnimatedVisibility(
         visibleState = visibleState,
@@ -329,6 +328,11 @@ private fun ErrorOverlay(
         ) + fadeIn(tween(300)),
         exit = fadeOut(tween(150)),
     ) {
+        // Inside the AnimatedVisibility content lambda: this LaunchedEffect only runs once the
+        // Retry/Back button below has actually composed, so requestFocus() succeeds immediately
+        // instead of throwing against a not-yet-attached target.
+        LaunchedEffect(Unit) { runCatching { primaryFocus.requestFocus() } }
+
         Box(
             modifier = Modifier.fillMaxSize().background(Scrim),
             contentAlignment = Alignment.Center,
