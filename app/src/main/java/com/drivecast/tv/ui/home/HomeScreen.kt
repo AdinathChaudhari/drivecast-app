@@ -77,6 +77,7 @@ import com.drivecast.tv.LocalAppContainer
 import com.drivecast.tv.api.ContinueItem
 import com.drivecast.tv.api.SectionInfo
 import com.drivecast.tv.api.Title
+import com.drivecast.tv.ui.common.BlurTransformation
 import com.drivecast.tv.ui.common.PosterCard
 import com.drivecast.tv.ui.common.SkeletonBox
 import com.drivecast.tv.ui.theme.Accent
@@ -438,8 +439,9 @@ private data class BackdropItem(val key: String, val poster: String?)
 
 /**
  * The hand-rolled immersive-list backdrop (androidx.tv.material3's ImmersiveList was removed).
- * Sits BEHIND [HomeContent]'s Column, one 960x540px bitmap at a time — Coil's memory cache keeps
- * only the current + previous frame alive, never a full-res decode. [item] is fed by a 400ms dwell
+ * Sits BEHIND [HomeContent]'s Column, one 480x270px bitmap at a time, stack-blurred at decode
+ * (Modifier.blur is a no-op below API 31, so the blur is baked into the cached bitmap; the small
+ * decode is free detail-loss the blur would erase anyway). [item] is fed by a 400ms dwell
  * debounce upstream, so this Crossfade only ever fires on rest, not on every D-pad press.
  */
 @Composable
@@ -458,7 +460,8 @@ private fun HomeBackdrop(item: () -> BackdropItem?, posterUrl: (String?) -> Stri
                 val request = remember(url) {
                     ImageRequest.Builder(context)
                         .data(url)
-                        .size(960, 540)
+                        .size(480, 270)
+                        .transformations(BlurTransformation(radius = 25))
                         .build()
                 }
                 AsyncImage(
