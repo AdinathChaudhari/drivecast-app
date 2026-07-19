@@ -104,7 +104,7 @@ private fun DetailContent(
             title = title.displayTitle,
             posterUrl = posterUrl(title.poster),
             onClick = {},
-            width = 220,
+            widthDp = 220.dp,
         )
         Spacer(Modifier.width(40.dp))
         Column(Modifier.fillMaxHeight().weight(1f)) {

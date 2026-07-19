@@ -19,8 +19,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
@@ -67,7 +69,7 @@ fun PosterCard(
     posterUrl: String?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    width: Int = 150,
+    widthDp: Dp = 150.dp,
     aspect: Float = 2f / 3f,
     overlay: @Composable BoxScope.() -> Unit = {},
 ) {
@@ -77,7 +79,7 @@ fun PosterCard(
     Card(
         onClick = onClick,
         scale = CardDefaults.scale(focusedScale = 1.08f),
-        modifier = modifier.width(width.dp),
+        modifier = modifier.width(widthDp),
     ) {
         Box(
             modifier = Modifier
@@ -85,10 +87,24 @@ fun PosterCard(
                 .aspectRatio(aspect),
         ) {
             if (posterUrl != null && !failed) {
-                AsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current)
+                val context = LocalContext.current
+                val density = LocalDensity.current
+                // Fire TV always renders the 960x540dp logical canvas at 2x density,
+                // so request the poster at its actual on-screen pixel size instead of
+                // the server-original resolution — the #1 named cause of GC stutter
+                // and OOM on 1GB Sticks.
+                val (wPx, hPx) = with(density) {
+                    widthDp.roundToPx() to (widthDp / aspect).roundToPx()
+                }
+                val request = remember(posterUrl, wPx, hPx) {
+                    ImageRequest.Builder(context)
                         .data(posterUrl)
-                        .build(),
+                        .size(wPx, hPx)
+                        .crossfade(200)
+                        .build()
+                }
+                AsyncImage(
+                    model = request,
                     imageLoader = imageLoader,
                     contentDescription = title,
                     contentScale = ContentScale.Crop,
