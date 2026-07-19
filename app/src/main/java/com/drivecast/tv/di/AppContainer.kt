@@ -1,7 +1,10 @@
 package com.drivecast.tv.di
 
 import android.content.Context
+import android.graphics.Bitmap
 import coil.ImageLoader
+import coil.disk.DiskCache
+import coil.memory.MemoryCache
 import com.drivecast.tv.api.TokenInterceptor
 import com.drivecast.tv.data.Discovery
 import com.drivecast.tv.data.KeepAwakeController
@@ -42,8 +45,25 @@ class AppContainer(context: Context) {
 
     val keepAwake = KeepAwakeController(repository)
 
+    // 1GB-RAM Fire TV Sticks: RGB_565 halves bitmap memory for posters (no alpha
+    // channel needed), memory/disk caches are capped, and no Transformation is ever
+    // added here (any Transformation silently forces ARGB_8888 back on).
     val imageLoader: ImageLoader = ImageLoader.Builder(context.applicationContext)
         .okHttpClient(okHttp)
-        .crossfade(true)
+        .bitmapConfig(Bitmap.Config.RGB_565)
+        .allowRgb565(true)
+        .crossfade(200)
+        .memoryCache {
+            MemoryCache.Builder(context.applicationContext)
+                .maxSizePercent(0.20)
+                .build()
+        }
+        .diskCache {
+            DiskCache.Builder()
+                .directory(context.applicationContext.cacheDir.resolve("img"))
+                .maxSizeBytes(128L * 1024 * 1024)
+                .build()
+        }
+        .respectCacheHeaders(false)
         .build()
 }

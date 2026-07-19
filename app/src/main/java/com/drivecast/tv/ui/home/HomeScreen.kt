@@ -365,7 +365,7 @@ private fun LibraryTile(
             title = title.displayTitle,
             posterUrl = posterUrl,
             onClick = onClick,
-            width = 120,
+            widthDp = 120.dp,
         ) {
             if (isEntertainment && title.isShow) {
                 TileBadge("TV", Modifier.align(Alignment.TopStart).padding(6.dp))
@@ -432,7 +432,7 @@ private fun ContinueCard(
         title = item.displayName,
         posterUrl = posterUrl,
         onClick = onClick,
-        width = 112,
+        widthDp = 112.dp,
         modifier = Modifier.onKeyEvent { e ->
             val native = e.nativeKeyEvent
             when {
