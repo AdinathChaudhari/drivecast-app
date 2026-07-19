@@ -52,7 +52,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
@@ -175,6 +177,7 @@ fun HomeScreen(
     }
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun HomeContent(
     continueItems: List<ContinueItem>,
@@ -218,25 +221,15 @@ private fun HomeContent(
     // back to the first card and defeating tvFocusRestorer + the saved grid state's job of
     // returning the user to the exact card they left. rememberSaveable survives that dispose via
     // NavHost's SaveableStateProvider, so the snap happens exactly once per back-stack entry.
-    // Focus-lane requesters, hoisted here and attached by whichever tab is active (only one tab
-    // is composed at rest). Each lane's tvFocusRestorer gets a fallback so a failed restore can
-    // never swallow the key press: worst case, focus lands on the lane's first item.
+    // Pills row is static chrome — always exactly one instance on screen, even mid tab-crossfade —
+    // so its requester is safe to hoist here. The per-tab lane requesters (continueLane,
+    // continueFirst, chipsFirst, firstTile) are NOT hoisted: AnimatedContent composes both the
+    // outgoing and incoming tab for the ~300ms crossfade, so a requester shared across tabs would
+    // get attached to TWO nodes at once, and a restore/fallback could land focus on the outgoing
+    // tab's node just before it's disposed — focus would silently die or jump. They're declared
+    // per-tab instead, inside the AnimatedContent content lambda below.
     val pillsFirst = remember { FocusRequester() }
-    val continueLane = remember { FocusRequester() }
-    val continueFirst = remember { FocusRequester() }
-    val chipsFirst = remember { FocusRequester() }
-    val firstTile = remember { FocusRequester() }
-
-    val tab0HasShelf = remember(continueItems, tabs) {
-        tabs.firstOrNull()?.let { t -> continueItems.any { sectionKeyOf(it) == t.key } } ?: false
-    }
     var focusedOnce by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        if (!focusedOnce) {
-            runCatching { (if (tab0HasShelf) continueFirst else firstTile).requestFocus() }
-            focusedOnce = true
-        }
-    }
 
     // Ambient backdrop identity. Written only by PosterCard's onFocused hook below — never read
     // by LibraryTile/ContinueCard or threaded through their parameters — so cards themselves never
@@ -348,12 +341,34 @@ private fun HomeContent(
                         continueItems.filter { sectionKeyOf(it) == sectionKey }
                     }
 
+                    // Focus-lane requesters, declared here (per-tab) rather than hoisted at
+                    // HomeContent scope: AnimatedContent keeps the outgoing tab composed alongside
+                    // the incoming one for the ~300ms crossfade, so a requester shared across tabs
+                    // would be attached to TWO nodes simultaneously, and a restore/fallback could
+                    // land focus on the outgoing tab's node moments before it's disposed — focus
+                    // would silently die or jump. One instance per tab (scoped by the enclosing
+                    // SaveableStateProvider(idx)) means each tab's lanes only ever reference that
+                    // tab's own, currently-composed nodes. Each lane's tvFocusRestorer still gets a
+                    // fallback so a failed restore can never swallow the key press: worst case,
+                    // focus lands on the lane's first item.
+                    val continueLane = remember { FocusRequester() }
+                    val continueFirst = remember { FocusRequester() }
+                    val chipsFirst = remember { FocusRequester() }
+                    val firstTile = remember { FocusRequester() }
+
                     // One scroll+focus position per tab (fixes scroll carryover across tabs);
                     // rememberSaveable survives process death and, combined with tvFocusRestorer
                     // below, restores both scroll offset and the focused card on back-navigation.
                     // Scoped by the enclosing SaveableStateProvider(idx) above, so no explicit idx
                     // key is needed here.
                     val gridState = rememberSaveable(saver = LazyGridState.Saver) { LazyGridState() }
+
+                    LaunchedEffect(Unit) {
+                        if (idx == 0 && !focusedOnce) {
+                            runCatching { (if (sectionContinue.isNotEmpty()) continueFirst else firstTile).requestFocus() }
+                            focusedOnce = true
+                        }
+                    }
 
                     LazyVerticalGrid(
                         state = gridState,
@@ -364,8 +379,17 @@ private fun HomeContent(
                         // The grid is the outermost focus group: entering it from the pills (or
                         // from another screen) restores the last-focused card. When that card is
                         // gone (tab rebuilt, item recycled), fall through the lanes in display
-                        // order instead of dropping the press.
-                        modifier = Modifier.fillMaxSize().tvFocusRestorer {
+                        // order instead of dropping the press. The group stays deactivated
+                        // (canFocus = false, same as focusGroup()'s default) so D-pad search still
+                        // recurses into the cards instead of stopping on the group itself; the
+                        // enter = Cancel gate below is what actually blocks the outgoing tab's
+                        // subtree from taking focus during the AnimatedContent crossfade (both tabs
+                        // are briefly composed together), so a D-pad press mid-fade can never wander
+                        // into a subtree that's about to be disposed.
+                        modifier = Modifier.fillMaxSize().focusProperties {
+                            canFocus = false // preserve focusGroup's deactivation — the outermost focusProperties wins
+                            if (idx != tabIndex) enter = { FocusRequester.Cancel } // block D-pad entry into the outgoing tab during the crossfade
+                        }.tvFocusRestorer {
                             when {
                                 sectionContinue.isNotEmpty() -> continueLane
                                 gridTitles.isNotEmpty() -> firstTile
