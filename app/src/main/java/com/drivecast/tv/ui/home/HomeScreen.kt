@@ -1,6 +1,14 @@
 package com.drivecast.tv.ui.home
 
 import android.view.KeyEvent
+import androidx.activity.compose.ReportDrawnWhen
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -8,34 +16,43 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.drivecast.tv.LocalAppContainer
 import com.drivecast.tv.api.ContinueItem
 import com.drivecast.tv.api.SectionInfo
 import com.drivecast.tv.api.Title
 import com.drivecast.tv.ui.common.PosterCard
+import com.drivecast.tv.ui.common.SkeletonBox
 import com.drivecast.tv.ui.theme.Accent
 import com.drivecast.tv.ui.theme.Background
 import com.drivecast.tv.ui.theme.ErrorRed
@@ -43,16 +60,15 @@ import com.drivecast.tv.ui.theme.OnAccent
 import com.drivecast.tv.ui.theme.SurfaceVariant
 import com.drivecast.tv.ui.theme.TextPrimary
 import com.drivecast.tv.ui.theme.TextSecondary
-import kotlinx.coroutines.launch
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import com.drivecast.tv.ui.common.PositionFocusedItemInLazyLayout
 import com.drivecast.tv.ui.common.tvFocusRestorer
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.tv.material3.Button
 import androidx.tv.material3.ButtonDefaults
 import androidx.tv.material3.MaterialTheme
@@ -68,30 +84,12 @@ fun HomeScreen(
     onPlay: (titleId: String, fileId: String) -> Unit,
 ) {
     val container = LocalAppContainer.current
-    val scope = rememberCoroutineScope()
+    val vm: HomeViewModel = viewModel(factory = HomeViewModel.factory(container))
+    val state by vm.state.collectAsStateWithLifecycle()
+    val pendingDismiss = remember { mutableStateOf<ContinueItem?>(null) }
 
-    var loading by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var continueItems by remember { mutableStateOf<List<ContinueItem>>(emptyList()) }
-    var titles by remember { mutableStateOf<List<Title>>(emptyList()) }
-    var sectionInfos by remember { mutableStateOf<List<SectionInfo>>(emptyList()) }
-    var pendingDismiss by remember { mutableStateOf<ContinueItem?>(null) }
-
-    suspend fun load() {
-        loading = true
-        error = null
-        runCatching {
-            val lib = container.repository.refresh()
-            titles = lib.titles
-            sectionInfos = runCatching { container.repository.sections() }.getOrDefault(emptyList())
-            continueItems = runCatching { container.repository.continueWatching() }.getOrDefault(emptyList())
-        }.onFailure {
-            error = "Couldn't load the library. ${it.message ?: ""}".trim()
-        }
-        loading = false
-    }
-
-    LaunchedEffect(Unit) { load() }
+    // TTFD: drawn once real content is on screen, not on the skeleton/cache-seeded first frame.
+    ReportDrawnWhen { state.titles?.isNotEmpty() == true }
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -99,37 +97,45 @@ fun HomeScreen(
     ) {
         Box(Modifier.fillMaxSize()) {
             when {
-                loading -> CenterProgress()
-                error != null -> CenterMessage(error!!) { scope.launch { load() } }
-                else -> HomeContent(
-                    continueItems = continueItems,
-                    titles = titles,
-                    sectionInfos = sectionInfos,
-                    onOpenTitle = onOpenTitle,
-                    onPlayContinue = { item ->
-                        val titleId = item.titleId
-                        if (titleId != null) onPlay(titleId, item.fileId)
-                    },
-                    onDismissRequest = { pendingDismiss = it },
-                    onRefresh = { scope.launch { load() } },
-                    posterUrl = { key -> container.repository.posterUrl(key) },
-                )
+                state.titles == null && state.error != null ->
+                    CenterMessage(state.error!!) { vm.refresh() }
+                else -> Crossfade(
+                    targetState = state.titles == null,
+                    animationSpec = tween(300),
+                    label = "homeLoading",
+                ) { loading ->
+                    if (loading) {
+                        HomeSkeleton()
+                    } else {
+                        HomeContent(
+                            continueItems = state.continueItems,
+                            titles = state.titles.orEmpty(),
+                            sectionInfos = state.sections,
+                            refreshing = state.refreshing,
+                            onOpenTitle = onOpenTitle,
+                            onPlayContinue = { item ->
+                                val titleId = item.titleId
+                                if (titleId != null) onPlay(titleId, item.fileId)
+                            },
+                            onDismissRequest = { pendingDismiss.value = it },
+                            onRefresh = { vm.refresh() },
+                            posterUrl = { key -> container.repository.posterUrl(key) },
+                        )
+                    }
+                }
             }
 
-            pendingDismiss?.let { item ->
-                DismissDialog(
-                    title = item.displayName,
-                    onConfirm = {
-                        pendingDismiss = null
-                        scope.launch {
-                            container.repository.removeContinue(item.fileId)
-                            continueItems = runCatching { container.repository.continueWatching() }
-                                .getOrDefault(emptyList())
-                        }
-                    },
-                    onCancel = { pendingDismiss = null },
-                )
-            }
+            // A MutableState reference is stable across recompositions; only DismissDialogHost
+            // itself reads `.value`, so opening/closing the dialog never recomposes HomeScreen
+            // (and therefore never recomposes HomeContent/the grid).
+            DismissDialogHost(
+                pendingDismiss = pendingDismiss,
+                onConfirm = { item ->
+                    pendingDismiss.value = null
+                    vm.dismissContinueItem(item.fileId)
+                },
+                onCancel = { pendingDismiss.value = null },
+            )
         }
     }
 }
@@ -139,12 +145,18 @@ private fun HomeContent(
     continueItems: List<ContinueItem>,
     titles: List<Title>,
     sectionInfos: List<SectionInfo>,
+    refreshing: Boolean,
     onOpenTitle: (String) -> Unit,
     onPlayContinue: (ContinueItem) -> Unit,
     onDismissRequest: (ContinueItem) -> Unit,
     onRefresh: () -> Unit,
     posterUrl: (String?) -> String?,
 ) {
+    // ONE stable (String) -> Unit reference handed to every grid item lambda below, instead of
+    // each item closing over `onOpenTitle` + its own `title` fresh every recomposition.
+    val currentOnOpenTitle by rememberUpdatedState(onOpenTitle)
+    val onTitleClick = remember { { id: String -> currentOnOpenTitle(id) } }
+
     val bySection = remember(titles) { titles.groupBy { sectionKeyOf(it) } }
     val tabs = remember(titles, sectionInfos) { buildTabs(bySection, sectionInfos) }
 
@@ -168,13 +180,18 @@ private fun HomeContent(
     val chips = remember(sectionTitles, isEntertainment) {
         if (isEntertainment) visibleChips(sectionTitles) else emptyList()
     }
-    val gridTitles = if (isEntertainment) {
-        sectionTitles.filter { matchesCategory(it, selectedCat) }
-    } else {
-        sectionTitles
+    val gridTitles = remember(sectionTitles, selectedCat, isEntertainment) {
+        if (isEntertainment) sectionTitles.filter { matchesCategory(it, selectedCat) } else sectionTitles
     }
 
-    val sectionContinue = continueItems.filter { sectionKeyOf(it) == sectionKey }
+    val sectionContinue = remember(continueItems, sectionKey) {
+        continueItems.filter { sectionKeyOf(it) == sectionKey }
+    }
+
+    // One scroll+focus position per tab (fixes scroll carryover across tabs); rememberSaveable
+    // survives process death and, combined with tvFocusRestorer below, restores both scroll
+    // offset and the focused card on back-navigation.
+    val gridState = rememberSaveable(selectedTab, saver = LazyGridState.Saver) { LazyGridState() }
 
     PositionFocusedItemInLazyLayout(0.10f) {
         Column(Modifier.fillMaxSize()) {
@@ -183,7 +200,13 @@ private fun HomeContent(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("drivecast", style = MaterialTheme.typography.headlineMedium, color = Accent)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("drivecast", style = MaterialTheme.typography.headlineMedium, color = Accent)
+                    if (refreshing) RefreshIndicator()
+                }
                 Button(onClick = onRefresh) { Text("Refresh") }
             }
 
@@ -211,11 +234,12 @@ private fun HomeContent(
             }
 
             LazyVerticalGrid(
+                state = gridState,
                 columns = GridCells.Adaptive(120.dp),
                 contentPadding = PaddingValues(start = 48.dp, end = 48.dp, bottom = 48.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
-                modifier = Modifier.fillMaxSize().weight(1f),
+                modifier = Modifier.fillMaxSize().weight(1f).tvFocusRestorer(),
             ) {
                 if (sectionContinue.isNotEmpty()) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
@@ -226,7 +250,7 @@ private fun HomeContent(
                                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                                 modifier = Modifier.tvFocusRestorer(),
                             ) {
-                                items(sectionContinue) { item ->
+                                items(sectionContinue, key = { it.fileId }, contentType = { "continue" }) { item ->
                                     ContinueCard(
                                         item = item,
                                         posterUrl = posterUrl(item.poster),
@@ -256,13 +280,13 @@ private fun HomeContent(
                     }
                 }
 
-                items(gridTitles, key = { it.id }) { title ->
+                items(gridTitles, key = { it.id }, contentType = { "poster" }) { title ->
                     LibraryTile(
                         title = title,
                         section = section,
                         isEntertainment = isEntertainment,
                         posterUrl = posterUrl(title.poster),
-                        onClick = { onOpenTitle(title.id) },
+                        onOpenTitle = onTitleClick,
                     )
                 }
             }
@@ -358,13 +382,13 @@ private fun LibraryTile(
     section: SectionInfo?,
     isEntertainment: Boolean,
     posterUrl: String?,
-    onClick: () -> Unit,
+    onOpenTitle: (String) -> Unit,
 ) {
     Column(Modifier.width(120.dp)) {
         PosterCard(
             title = title.displayTitle,
             posterUrl = posterUrl,
-            onClick = onClick,
+            onClick = { onOpenTitle(title.id) },
             widthDp = 120.dp,
         ) {
             if (isEntertainment && title.isShow) {
@@ -465,6 +489,27 @@ private fun ContinueCard(
     }
 }
 
+/**
+ * Owns nothing itself — [pendingDismiss] is hoisted in [HomeScreen] as a [MutableState] so its
+ * setter can be threaded down into [ContinueCard]'s onDismiss. Passing the MutableState
+ * *reference* down (instead of its `.value`) keeps HomeScreen's own recomposition scope from ever
+ * subscribing to it: only this composable reads `.value`, so opening/closing the confirm dialog
+ * recomposes just this tiny subtree, never the grid above it.
+ */
+@Composable
+private fun DismissDialogHost(
+    pendingDismiss: MutableState<ContinueItem?>,
+    onConfirm: (ContinueItem) -> Unit,
+    onCancel: () -> Unit,
+) {
+    val item = pendingDismiss.value ?: return
+    DismissDialog(
+        title = item.displayName,
+        onConfirm = { onConfirm(item) },
+        onCancel = onCancel,
+    )
+}
+
 @Composable
 private fun DismissDialog(title: String, onConfirm: () -> Unit, onCancel: () -> Unit) {
     Box(
@@ -496,10 +541,90 @@ private fun DismissDialog(title: String, onConfirm: () -> Unit, onCancel: () -> 
     }
 }
 
+/**
+ * True cold start only (no [AppContainer.homeCache] to seed from): mirrors [HomeContent]'s real
+ * layout at its exact final dimensions so there is no layout jump when the first fetch lands.
+ * Shimmer is capped at the top 2 poster rows (the Continue Watching shelf + the first grid row) —
+ * an infinite animation competes with first-frame work on Stick GPUs, so everything below is
+ * static per [SkeletonBox]'s own guidance.
+ */
 @Composable
-private fun CenterProgress() {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        CircularProgressIndicator()
+private fun HomeSkeleton() {
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(start = 48.dp, end = 48.dp, top = 28.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            SkeletonBox(Modifier.width(150.dp).height(32.dp), animated = false)
+        }
+
+        Spacer(Modifier.height(16.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 48.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            repeat(3) {
+                SkeletonBox(
+                    modifier = Modifier.width(96.dp).height(32.dp),
+                    shape = RoundedCornerShape(50),
+                    animated = false,
+                )
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+        Column(Modifier.weight(1f).padding(horizontal = 48.dp)) {
+            // Continue Watching shelf — the 1st of the "top 2 rows" that shimmer.
+            SkeletonBox(Modifier.width(180.dp).height(20.dp), animated = false)
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                repeat(6) {
+                    SkeletonBox(modifier = Modifier.width(120.dp).aspectRatio(2f / 3f), animated = true)
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+            // Grid row 1 — the 2nd of the "top 2 rows" that shimmer.
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                repeat(6) {
+                    SkeletonBox(modifier = Modifier.width(120.dp).aspectRatio(2f / 3f), animated = true)
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+            // Grid row 2 — below the fold, static.
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                repeat(6) {
+                    SkeletonBox(modifier = Modifier.width(120.dp).aspectRatio(2f / 3f), animated = false)
+                }
+            }
+        }
+    }
+}
+
+/** A small graphicsLayer-driven spin — no material3 dependency, no layout-affecting animation. */
+@Composable
+private fun RefreshIndicator(modifier: Modifier = Modifier) {
+    val transition = rememberInfiniteTransition(label = "refreshSpin")
+    val angle by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(animation = tween(900, easing = LinearEasing)),
+        label = "refreshAngle",
+    )
+    Canvas(
+        modifier = modifier
+            .size(20.dp)
+            .graphicsLayer { rotationZ = angle },
+    ) {
+        drawArc(
+            color = Accent,
+            startAngle = 0f,
+            sweepAngle = 270f,
+            useCenter = false,
+            style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round),
+        )
     }
 }
 
