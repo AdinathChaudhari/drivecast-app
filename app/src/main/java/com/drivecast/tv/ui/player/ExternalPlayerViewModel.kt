@@ -30,7 +30,11 @@ data class ExternalPlayerUiState(
     val nowPlayingTitle: String? = null,
     val playing: Boolean = false,
     val error: String? = null,
-    val upNext: UpNext? = null,
+    // The up-next banner's identity/visibility only; the 1Hz countdown value lives
+    // in [ExternalPlayerViewModel.upNextRemaining] (see PlayerViewModel for why).
+    val upNextVisible: Boolean = false,
+    val nextTitle: String? = null,
+    val nextPosterUrl: String? = null,
     val finished: Boolean = false,
 )
 
@@ -63,12 +67,18 @@ class ExternalPlayerViewModel(
     private val _ui = MutableStateFlow(ExternalPlayerUiState())
     val ui: StateFlow<ExternalPlayerUiState> = _ui.asStateFlow()
 
+    // Sliced out of [ui] so the 1Hz tick recomposes only the leaf collecting this
+    // flow (the countdown ring), never the whole overlay/host tree.
+    private val _upNextRemaining = MutableStateFlow<Int?>(null)
+    val upNextRemaining: StateFlow<Int?> = _upNextRemaining.asStateFlow()
+
     private val _launches = Channel<VlcLaunchRequest>(Channel.BUFFERED)
     val launches = _launches.receiveAsFlow()
 
     private var queue: List<QueueItem> = emptyList()
     private var currentIndex = 0
     private var progressMap: Map<String, WatchedProgress> = emptyMap()
+    private var currentPosterUrl: String? = null
 
     private var playlistSession = false
     private var isShowPath = false
@@ -83,6 +93,7 @@ class ExternalPlayerViewModel(
 
     private suspend fun bootstrap() {
         val title = runCatching { repo.title(titleId) }.getOrNull()
+        currentPosterUrl = title?.poster
         isShowPath = (title?.isShow == true) && (shuffle || PlaybackQueue.isMainShowEpisode(title, startFileId))
         // Build the queue so it EQUALS the server's m3u order.
         if (shuffle) {
@@ -110,11 +121,12 @@ class ExternalPlayerViewModel(
         }
         val resumeMs = if (fromStart) 0L else PlaybackQueue.resumeMsFor(item, progressMap)
 
+        _upNextRemaining.value = null
         _ui.value = _ui.value.copy(
             loading = false,
             nowPlayingTitle = item.name,
             playing = true,
-            upNext = null,
+            upNextVisible = false,
             error = null,
         )
 
@@ -288,13 +300,19 @@ class ExternalPlayerViewModel(
     private fun startUpNextCountdown(nextIndex: Int) {
         upNextJob?.cancel()
         val next = queue[nextIndex]
-        _ui.value = _ui.value.copy(playing = false)
+        _ui.value = _ui.value.copy(
+            playing = false,
+            upNextVisible = true,
+            nextTitle = next.name ?: "Next",
+            nextPosterUrl = currentPosterUrl,
+        )
         upNextJob = viewModelScope.launch {
             for (seconds in 5 downTo 1) {
-                _ui.value = _ui.value.copy(upNext = UpNext(next.name ?: "Next", seconds))
+                _upNextRemaining.value = seconds
                 delay(1_000)
             }
-            _ui.value = _ui.value.copy(upNext = null)
+            _upNextRemaining.value = null
+            _ui.value = _ui.value.copy(upNextVisible = false)
             currentIndex = nextIndex
             launchCurrent(fromStart = true)
         }
@@ -302,8 +320,9 @@ class ExternalPlayerViewModel(
 
     fun playNextNow() {
         upNextJob?.cancel()
-        if (_ui.value.upNext == null) return
-        _ui.value = _ui.value.copy(upNext = null)
+        if (!_ui.value.upNextVisible) return
+        _upNextRemaining.value = null
+        _ui.value = _ui.value.copy(upNextVisible = false)
         val nextIndex = currentIndex + 1
         if (nextIndex in queue.indices) {
             currentIndex = nextIndex
@@ -315,7 +334,8 @@ class ExternalPlayerViewModel(
 
     fun cancelUpNext() {
         upNextJob?.cancel()
-        _ui.value = _ui.value.copy(upNext = null, finished = true)
+        _upNextRemaining.value = null
+        _ui.value = _ui.value.copy(upNextVisible = false, finished = true)
     }
 
     private fun startAwakePolling() {
