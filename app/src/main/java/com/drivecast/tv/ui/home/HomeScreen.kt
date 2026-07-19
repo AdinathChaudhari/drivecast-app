@@ -45,7 +45,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -106,6 +108,7 @@ import androidx.tv.material3.Surface
 import androidx.tv.material3.SurfaceDefaults
 import androidx.tv.material3.Text
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 
 private const val ENTERTAINMENT = "entertainment"
 
@@ -191,7 +194,15 @@ private fun HomeContent(
     val bySection = remember(titles) { titles.groupBy { sectionKeyOf(it) } }
     val tabs = remember(titles, sectionInfos) { buildTabs(bySection, sectionInfos) }
 
-    var selectedTab by remember { mutableIntStateOf(0) }
+    // AnimatedContent has no SaveableStateHolder of its own, so a rememberSaveable inside its
+    // content lambda is simply discarded when that content leaves composition on a tab switch.
+    // This hoisted holder performs save-on-dispose / restore-on-re-entry per tab index, giving
+    // each tab its own persisted grid scroll+focus position instead of resetting to the top.
+    val tabStateHolder = rememberSaveableStateHolder()
+
+    // rememberSaveable: back-navigation from detail must return to whichever tab the user was
+    // browsing, not always tab 0.
+    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     val tabIndex = selectedTab.coerceIn(0, (tabs.size - 1).coerceAtLeast(0))
 
     // Category filter (entertainment tab only). null == "All". Resets whenever the tab changes.
@@ -200,10 +211,19 @@ private fun HomeContent(
     // Initial focus: the first Continue Watching card if the opening tab has one, else the
     // first grid tile. HomeContent only enters composition once real data has landed (the
     // Crossfade above gates it), so a Unit-keyed effect already fires after the real tree
-    // exists and never on the skeleton.
+    // exists and never on the skeleton. Gated by a rememberSaveable flag: NavHost disposes and
+    // recomposes the home destination on every back-nav from detail (it renders instantly from
+    // cache), and without the gate this effect would re-fire on every re-entry, snapping focus
+    // back to the first card and defeating tvFocusRestorer + the saved grid state's job of
+    // returning the user to the exact card they left. rememberSaveable survives that dispose via
+    // NavHost's SaveableStateProvider, so the snap happens exactly once per back-stack entry.
     val initialFocus = remember { FocusRequester() }
+    var focusedOnce by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        runCatching { initialFocus.requestFocus() }
+        if (!focusedOnce) {
+            runCatching { initialFocus.requestFocus() }
+            focusedOnce = true
+        }
     }
 
     // Ambient backdrop identity. Written only by PosterCard's onFocused hook below — never read
@@ -215,13 +235,20 @@ private fun HomeContent(
     var focusedItem by remember { mutableStateOf<BackdropItem?>(null) }
     val onCardFocused = remember { { item: BackdropItem -> focusedItem = item } }
     var backdropItem by remember { mutableStateOf<BackdropItem?>(null) }
-    LaunchedEffect(focusedItem) {
-        delay(400)
-        backdropItem = focusedItem
+    // snapshotFlow + collectLatest instead of a LaunchedEffect(focusedItem) key: a keyed effect
+    // reads focusedItem at HomeContent's OWN composition scope, so every onCardFocused write
+    // (every D-pad focus move) re-ran this whole composable's body. This reproduces the same
+    // 400ms dwell debounce (a new focus cancels the pending delay) with zero composition-scope
+    // reads here — HomeBackdrop reads backdropItem itself, in its own scope, below.
+    LaunchedEffect(Unit) {
+        snapshotFlow { focusedItem }.collectLatest {
+            delay(400)
+            backdropItem = it
+        }
     }
 
     Box(Modifier.fillMaxSize()) {
-        HomeBackdrop(item = backdropItem, posterUrl = posterUrl)
+        HomeBackdrop(item = { backdropItem }, posterUrl = posterUrl)
 
         PositionFocusedItemInLazyLayout(0.10f) {
             Column(Modifier.fillMaxSize()) {
@@ -277,6 +304,13 @@ private fun HomeContent(
                     modifier = Modifier.fillMaxSize().weight(1f),
                     label = "tabContent",
                 ) { idx ->
+                    // AnimatedContent has no SaveableStateHolder of its own: when a tab's content
+                    // leaves composition on a tab switch, a plain rememberSaveable inside it is
+                    // simply discarded rather than cached-and-restored, so every switch back would
+                    // reset that tab's scroll to the top. Wrapping each child in this hoisted
+                    // holder's SaveableStateProvider(idx) performs save-on-dispose / restore-on-
+                    // re-entry, giving each tab its own persisted scroll+focus position.
+                    tabStateHolder.SaveableStateProvider(idx) {
                     val section = tabs.getOrNull(idx)
                     val sectionKey = section?.key ?: ENTERTAINMENT
                     // Branch on the server-declared behavior, not the key; fall back to the key
@@ -303,7 +337,9 @@ private fun HomeContent(
                     // One scroll+focus position per tab (fixes scroll carryover across tabs);
                     // rememberSaveable survives process death and, combined with tvFocusRestorer
                     // below, restores both scroll offset and the focused card on back-navigation.
-                    val gridState = rememberSaveable(idx, saver = LazyGridState.Saver) { LazyGridState() }
+                    // Scoped by the enclosing SaveableStateProvider(idx) above, so no explicit idx
+                    // key is needed here.
+                    val gridState = rememberSaveable(saver = LazyGridState.Saver) { LazyGridState() }
 
                     LazyVerticalGrid(
                         state = gridState,
@@ -383,6 +419,7 @@ private fun HomeContent(
                             )
                         }
                     }
+                    }
                 }
             }
         }
@@ -406,12 +443,12 @@ private data class BackdropItem(val key: String, val poster: String?)
  * debounce upstream, so this Crossfade only ever fires on rest, not on every D-pad press.
  */
 @Composable
-private fun HomeBackdrop(item: BackdropItem?, posterUrl: (String?) -> String?) {
+private fun HomeBackdrop(item: () -> BackdropItem?, posterUrl: (String?) -> String?) {
     val imageLoader = LocalAppContainer.current.imageLoader
     val context = LocalContext.current
 
     Crossfade(
-        targetState = item,
+        targetState = item(),
         animationSpec = tween(500),
         label = "homeBackdrop",
     ) { target ->
@@ -738,7 +775,6 @@ private fun DismissDialog(title: String, onConfirm: () -> Unit, onCancel: () -> 
         val visibleState = remember { MutableTransitionState(false) }
         LaunchedEffect(Unit) { visibleState.targetState = true }
         val cancelFocus = remember { FocusRequester() }
-        LaunchedEffect(Unit) { runCatching { cancelFocus.requestFocus() } }
 
         Box(Modifier.fillMaxSize()) {
             AnimatedVisibility(
@@ -757,6 +793,13 @@ private fun DismissDialog(title: String, onConfirm: () -> Unit, onCancel: () -> 
                             animationSpec = tween(220, easing = MotionTokens.EmphasizedDecelerate),
                         ),
                 ) {
+                    // Requesting focus here — inside the AnimatedVisibility content lambda —
+                    // rather than in an effect scoped to the outer Dialog composable means this
+                    // LaunchedEffect only runs once the Cancel button below has actually composed,
+                    // so requestFocus() succeeds immediately instead of throwing (FocusRequester
+                    // not attached) against a not-yet-composed target.
+                    LaunchedEffect(Unit) { runCatching { cancelFocus.requestFocus() } }
+
                     Surface(
                         shape = RoundedCornerShape(16.dp),
                         colors = SurfaceDefaults.colors(containerColor = SurfaceColor),
@@ -776,6 +819,14 @@ private fun DismissDialog(title: String, onConfirm: () -> Unit, onCancel: () -> 
                             Text(title, color = TextSecondary)
                             Spacer(Modifier.height(24.dp))
                             Row {
+                                // Cancel before Remove: a belt-and-braces default so even if focus
+                                // request timing ever regressed, layout-order focus still lands on
+                                // the safe action, not the destructive one.
+                                Button(
+                                    onClick = onCancel,
+                                    modifier = Modifier.focusRequester(cancelFocus),
+                                ) { Text("Cancel") }
+                                Spacer(Modifier.width(12.dp))
                                 Button(
                                     onClick = onConfirm,
                                     colors = ButtonDefaults.colors(
@@ -785,11 +836,6 @@ private fun DismissDialog(title: String, onConfirm: () -> Unit, onCancel: () -> 
                                         focusedContentColor = Color.White,
                                     ),
                                 ) { Text("Remove") }
-                                Spacer(Modifier.width(12.dp))
-                                Button(
-                                    onClick = onCancel,
-                                    modifier = Modifier.focusRequester(cancelFocus),
-                                ) { Text("Cancel") }
                             }
                         }
                     }
@@ -833,28 +879,31 @@ private fun HomeSkeleton() {
 
         Spacer(Modifier.height(16.dp))
         Column(Modifier.weight(1f).padding(horizontal = 48.dp)) {
-            // Continue Watching shelf — the 1st of the "top 2 rows" that shimmer.
+            // Continue Watching shelf — the 1st of the "top 2 rows" that shimmer. Width matches
+            // the real 140dp ContinueCard so the skeleton->content Crossfade doesn't reflow.
+            // 5 boxes at 140dp + 16dp spacing = 764dp, fits the 864dp canvas (960 - 96 padding).
             SkeletonBox(Modifier.width(180.dp).height(20.dp), animated = false)
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                repeat(6) {
-                    SkeletonBox(modifier = Modifier.width(120.dp).aspectRatio(2f / 3f), animated = true)
+                repeat(5) {
+                    SkeletonBox(modifier = Modifier.width(140.dp).aspectRatio(2f / 3f), animated = true)
                 }
             }
 
             Spacer(Modifier.height(16.dp))
-            // Grid row 1 — the 2nd of the "top 2 rows" that shimmer.
+            // Grid row 1 — the 2nd of the "top 2 rows" that shimmer. Width matches the real
+            // 160dp GridCells.Adaptive LibraryTile. 4 boxes at 160dp + 16dp spacing = 688dp, fits.
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                repeat(6) {
-                    SkeletonBox(modifier = Modifier.width(120.dp).aspectRatio(2f / 3f), animated = true)
+                repeat(4) {
+                    SkeletonBox(modifier = Modifier.width(160.dp).aspectRatio(2f / 3f), animated = true)
                 }
             }
 
             Spacer(Modifier.height(16.dp))
             // Grid row 2 — below the fold, static.
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                repeat(6) {
-                    SkeletonBox(modifier = Modifier.width(120.dp).aspectRatio(2f / 3f), animated = false)
+                repeat(4) {
+                    SkeletonBox(modifier = Modifier.width(160.dp).aspectRatio(2f / 3f), animated = false)
                 }
             }
         }

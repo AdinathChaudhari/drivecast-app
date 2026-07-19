@@ -127,7 +127,6 @@ private fun StillWatchingDialog(
         val visibleState = remember { MutableTransitionState(false) }
         LaunchedEffect(Unit) { visibleState.targetState = true }
         val yesFocus = remember { FocusRequester() }
-        LaunchedEffect(Unit) { runCatching { yesFocus.requestFocus() } }
 
         Box(Modifier.fillMaxSize()) {
             AnimatedVisibility(
@@ -146,6 +145,11 @@ private fun StillWatchingDialog(
                             animationSpec = tween(220, easing = MotionTokens.EmphasizedDecelerate),
                         ),
                 ) {
+                    // Inside the AnimatedVisibility content lambda: this LaunchedEffect only runs
+                    // once "Yes, keep watching" below has actually composed, so requestFocus()
+                    // succeeds immediately instead of throwing against a not-yet-attached target.
+                    LaunchedEffect(Unit) { runCatching { yesFocus.requestFocus() } }
+
                     Surface(
                         shape = RoundedCornerShape(16.dp),
                         colors = SurfaceDefaults.colors(containerColor = SurfaceColor),
