@@ -460,6 +460,7 @@ private fun ShowSeasons(
     // only via a rememberSaveable flag — on a back-nav return the restored saved scroll must win,
     // and tvFocusRestorer already owns focus restoration for the list.
     val resumeFocus = remember { FocusRequester() }
+    val seasonFirst = remember { FocusRequester() }
     val resumeIndex = remember(current, progress) {
         current.episodes.indexOfFirst { ep -> ep.fileId?.let { progress[it]?.watched != true } ?: true }
             .takeIf { it >= 0 } ?: 0
@@ -490,7 +491,7 @@ private fun ShowSeasons(
             }) { Text("Shuffle") }
             Spacer(Modifier.width(12.dp))
             LazyRow(
-                modifier = Modifier.weight(1f).tvFocusRestorer(),
+                modifier = Modifier.weight(1f).tvFocusRestorer { seasonFirst },
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 itemsIndexed(seasons) { index, season ->
@@ -499,6 +500,7 @@ private fun ShowSeasons(
                         label = season.name ?: "$seasonWord ${season.season ?: (index + 1)}",
                         selected = index == selected.coerceIn(0, seasons.lastIndex),
                         onFocused = { focusedSeason = index },
+                        modifier = if (index == 0) Modifier.focusRequester(seasonFirst) else Modifier,
                     )
                 }
             }
@@ -522,7 +524,9 @@ private fun ShowSeasons(
             LazyColumn(
                 state = childListState,
                 verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth().tvFocusRestorer(),
+                // Fallback to the resume row (always attached in the selected season's list): a
+                // failed restore lands on the episode you'd play next instead of eating the press.
+                modifier = Modifier.fillMaxWidth().tvFocusRestorer { resumeFocus },
             ) {
                 itemsIndexed(
                     season.episodes,
@@ -544,7 +548,12 @@ private fun ShowSeasons(
 }
 
 @Composable
-private fun SeasonPill(label: String, selected: Boolean, onFocused: () -> Unit) {
+private fun SeasonPill(
+    label: String,
+    selected: Boolean,
+    onFocused: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val containerColor by animateColorAsState(
         targetValue = if (selected) Accent else SurfaceVariant,
         animationSpec = tween(MotionTokens.DurationShort, easing = MotionTokens.Emphasized),
@@ -558,7 +567,7 @@ private fun SeasonPill(label: String, selected: Boolean, onFocused: () -> Unit) 
     Button(
         onClick = onFocused,
         colors = ButtonDefaults.colors(containerColor = containerColor, contentColor = contentColor),
-        modifier = Modifier.onFocusChanged { if (it.isFocused) onFocused() },
+        modifier = modifier.onFocusChanged { if (it.isFocused) onFocused() },
     ) {
         Text(label, maxLines = 1)
     }

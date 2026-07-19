@@ -138,6 +138,15 @@ Fire TV design guidance and budgeted for the Stick's modest hardware (about
 - **Rows glide instead of jump.** The focused tile holds a steady position
   near the left edge and the row scrolls under it, and pressing Back returns
   focus to the exact card you left instead of the start of the row.
+- **A press is never wasted.** Returning focus to a card that no longer
+  exists (a rebuilt tab, a recycled tile) used to silently swallow the key
+  press — the "dead D-pad" feel. Every focus lane now declares a fallback
+  (its first item), so focus always lands somewhere sensible on the first
+  press.
+- **The ambient backdrop is blurred, not stretched.** The poster behind the
+  home grid gets a heavy blur baked in when the image is decoded (older
+  Fire OS can't blur live on the GPU), so it reads as atmosphere rather
+  than a low-resolution image blown up to TV size — at zero per-frame cost.
 - **Waiting looks intentional.** A branded splash covers cold start, and
   screens draw shimmering placeholder tiles at their final size instead of a
   spinner, so the layout never reflows when content arrives. Coming back to
