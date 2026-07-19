@@ -9,6 +9,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRestorer
 
 /**
@@ -16,9 +17,17 @@ import androidx.compose.ui.focus.focusRestorer
  * change (when we eventually bump past Compose 1.7) is a one-line fix here
  * instead of a sweep across every call site. [Modifier.focusGroup] shrinks
  * the D-pad focus search space to this subtree.
+ *
+ * [onRestoreFailed] is the reason this wrapper exists at all: without it, a
+ * restorer whose remembered child left composition (tab switch rebuilt the
+ * lane, or a lazy layout recycled the card) fails the restore and SWALLOWS
+ * the key event — the "dead D-pad press". Every lane must pass a fallback
+ * (usually a FocusRequester on its first item) so entering the lane always
+ * lands somewhere.
  */
 @OptIn(ExperimentalComposeUiApi::class)
-fun Modifier.tvFocusRestorer(): Modifier = this.focusRestorer().focusGroup()
+fun Modifier.tvFocusRestorer(onRestoreFailed: (() -> FocusRequester)? = null): Modifier =
+    this.focusRestorer(onRestoreFailed).focusGroup()
 
 /**
  * Pins the pivot fraction used when bringing a focused child of a lazy
