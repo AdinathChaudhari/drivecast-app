@@ -14,6 +14,11 @@ private val DarkColors = darkColorScheme(
     surfaceVariant = SurfaceVariant,
     onSurfaceVariant = TextSecondary,
     error = ErrorRed,
+    secondary = TextSecondary,
+    secondaryContainer = SurfaceVariant,
+    tertiary = Accent,
+    inverseSurface = TextPrimary,
+    border = Outline,
 )
 
 @Composable

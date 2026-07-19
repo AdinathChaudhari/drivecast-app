@@ -125,6 +125,31 @@ season/episode list with watched checkmarks) → **Player**.
 - **Google Drive quotas are real.** Drive limits daily downloads per file;
   when it happens the app says so plainly instead of spinning forever.
 
+## Why v0.5.0 feels different
+
+Version 0.5.0 was a top-to-bottom smoothness pass, planned against Amazon's
+Fire TV design guidance and budgeted for the Stick's modest hardware (about
+1GB of RAM and a low-end GPU):
+
+- **Everything the D-pad touches answers with motion.** Every card and button
+  shares one focus treatment — a slight grow, a white outline, a soft glow —
+  animated only on the GPU-cheap properties (scale and alpha, never blur), so
+  focus never stutters.
+- **Rows glide instead of jump.** The focused tile holds a steady position
+  near the left edge and the row scrolls under it, and pressing Back returns
+  focus to the exact card you left instead of the start of the row.
+- **Waiting looks intentional.** A branded splash covers cold start, and
+  screens draw shimmering placeholder tiles at their final size instead of a
+  spinner, so the layout never reflows when content arrives. Coming back to
+  Home renders instantly from cache and refreshes quietly in the background.
+- **Images are budgeted.** Posters decode at exactly the size of their tile,
+  in a memory-lean pixel format, with capped memory and disk caches — a big
+  library can't push the app out of the Stick's RAM mid-scroll.
+- **The release build is properly optimized.** R8 minification shrinks and
+  pre-optimizes the code, and a baseline-profile scaffold pre-compiles the
+  scrolling hot paths at install time — sideloaded apps never get the Play
+  Store's cloud profiles, so the app carries its own.
+
 ## How it was built
 
 The project was planned and written with Claude Code: the drivecast server

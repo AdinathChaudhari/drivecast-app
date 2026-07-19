@@ -21,3 +21,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "drivecast-tv"
 include(":app")
+include(":baselineprofile")
