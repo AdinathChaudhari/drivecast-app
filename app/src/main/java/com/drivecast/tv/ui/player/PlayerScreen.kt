@@ -8,6 +8,15 @@ import android.net.Uri
 import android.view.ViewGroup
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,7 +25,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -26,8 +38,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.focusGroup
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -35,10 +54,17 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
 import com.drivecast.tv.LocalAppContainer
+import com.drivecast.tv.ui.common.PosterCard
+import com.drivecast.tv.ui.theme.Accent
+import com.drivecast.tv.ui.theme.MotionTokens
+import com.drivecast.tv.ui.theme.OnAccent
+import com.drivecast.tv.ui.theme.Scrim
+import com.drivecast.tv.ui.theme.Surface as SurfaceColor
 import com.drivecast.tv.ui.theme.TextPrimary
 import com.drivecast.tv.ui.theme.TextSecondary
-import androidx.compose.material3.CircularProgressIndicator
+import kotlinx.coroutines.flow.StateFlow
 import androidx.tv.material3.Button
+import androidx.tv.material3.ButtonDefaults
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Surface
 import androidx.tv.material3.SurfaceDefaults
@@ -143,28 +169,46 @@ private fun VlcPlayerHost(
         modifier = Modifier.fillMaxSize(),
         colors = SurfaceDefaults.colors(containerColor = Color.Black),
     ) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            val upNext = state.upNext
+        Box(Modifier.fillMaxSize()) {
             when {
-                state.error != null -> ExternalMessage(state.error!!, onExit)
-                upNext != null -> UpNextExternal(
-                    title = upNext.title,
-                    secondsLeft = upNext.secondsLeft,
+                state.error != null -> ExternalMessage(
+                    message = state.error!!,
+                    onExit = onExit,
+                    modifier = Modifier.align(Alignment.Center),
+                )
+                else -> PlayingInVlc(
+                    title = state.nowPlayingTitle,
+                    modifier = Modifier.align(Alignment.Center),
+                )
+            }
+
+            AnimatedVisibility(
+                visible = state.upNextVisible && state.error == null,
+                modifier = Modifier.align(Alignment.BottomEnd),
+                enter = slideInVertically(
+                    initialOffsetY = { it / 3 },
+                    animationSpec = tween(300, easing = MotionTokens.EmphasizedDecelerate),
+                ) + fadeIn(tween(300)),
+                exit = fadeOut(tween(150)),
+            ) {
+                UpNextCard(
+                    nextTitle = state.nextTitle ?: "Next",
+                    posterUrl = state.nextPosterUrl,
+                    remaining = vm.upNextRemaining,
                     onPlayNow = { vm.playNextNow() },
                     onCancel = { vm.cancelUpNext() },
                 )
-                else -> PlayingInVlc(state.nowPlayingTitle)
             }
         }
     }
 }
 
 @Composable
-private fun PlayingInVlc(title: String?) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        CircularProgressIndicator()
+private fun PlayingInVlc(title: String?, modifier: Modifier = Modifier) {
+    Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("drivecast", color = Accent, style = MaterialTheme.typography.displaySmall)
         Spacer(Modifier.height(20.dp))
-        Text("Playing in VLC…", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+        Text("Playing in VLC…", color = TextPrimary, style = MaterialTheme.typography.bodyLarge)
         title?.let {
             Spacer(Modifier.height(6.dp))
             Text(it, color = TextSecondary, style = MaterialTheme.typography.bodyMedium)
@@ -173,28 +217,8 @@ private fun PlayingInVlc(title: String?) {
 }
 
 @Composable
-private fun UpNextExternal(
-    title: String,
-    secondsLeft: Int,
-    onPlayNow: () -> Unit,
-    onCancel: () -> Unit,
-) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("Up next in ${secondsLeft}s", color = TextSecondary, style = MaterialTheme.typography.labelLarge)
-        Spacer(Modifier.height(8.dp))
-        Text(title, color = TextPrimary, style = MaterialTheme.typography.titleLarge, maxLines = 2)
-        Spacer(Modifier.height(20.dp))
-        Row {
-            Button(onClick = onPlayNow) { Text("Play now") }
-            Spacer(Modifier.width(12.dp))
-            Button(onClick = onCancel) { Text("Cancel") }
-        }
-    }
-}
-
-@Composable
-private fun ExternalMessage(message: String, onExit: () -> Unit) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+private fun ExternalMessage(message: String, onExit: () -> Unit, modifier: Modifier = Modifier) {
+    Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Text(message, color = TextPrimary, style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(20.dp))
         Button(onClick = onExit) { Text("Back") }
@@ -224,6 +248,12 @@ private fun InternalPlayerScreen(
         onDispose { vm.reportStop() }
     }
 
+    // The Compose overlay (up-next card / error retry) and the Media3 PlayerView's
+    // own controller must never fight for the D-pad at the same time — otherwise
+    // the up-next countdown can expire while presses land on the controller
+    // underneath. Unfocus the PlayerView whenever a Compose overlay is showing.
+    val overlayVisible = state.error != null || state.upNextVisible
+
     Surface(
         modifier = Modifier.fillMaxSize(),
         colors = SurfaceDefaults.colors(containerColor = Color.Black),
@@ -242,6 +272,7 @@ private fun InternalPlayerScreen(
                         )
                     }
                 },
+                update = { view -> view.isFocusable = !overlayVisible },
                 modifier = Modifier.fillMaxSize(),
             )
 
@@ -254,13 +285,21 @@ private fun InternalPlayerScreen(
                 )
             }
 
-            state.upNext?.let { upNext ->
-                UpNextOverlay(
-                    title = upNext.title,
-                    secondsLeft = upNext.secondsLeft,
+            AnimatedVisibility(
+                visible = state.upNextVisible && state.error == null,
+                modifier = Modifier.align(Alignment.BottomEnd),
+                enter = slideInVertically(
+                    initialOffsetY = { it / 3 },
+                    animationSpec = tween(300, easing = MotionTokens.EmphasizedDecelerate),
+                ) + fadeIn(tween(300)),
+                exit = fadeOut(tween(150)),
+            ) {
+                UpNextCard(
+                    nextTitle = state.nextTitle ?: "Next",
+                    posterUrl = state.nextPosterUrl,
+                    remaining = vm.upNextRemaining,
                     onPlayNow = { vm.playNextNow() },
                     onCancel = { vm.cancelUpNext() },
-                    modifier = Modifier.align(Alignment.BottomEnd),
                 )
             }
         }
@@ -274,51 +313,136 @@ private fun ErrorOverlay(
     onRetry: () -> Unit,
     onExit: () -> Unit,
 ) {
-    Box(
-        modifier = Modifier.fillMaxSize().background(Color(0xCC000000)),
-        contentAlignment = Alignment.Center,
+    val visibleState = remember { MutableTransitionState(false) }
+    LaunchedEffect(Unit) { visibleState.targetState = true }
+
+    // Guarantee a focused action even when there's no Retry: an error is never a
+    // dead end for the D-pad.
+    val primaryFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { primaryFocus.requestFocus() } }
+
+    AnimatedVisibility(
+        visibleState = visibleState,
+        enter = slideInVertically(
+            initialOffsetY = { it / 3 },
+            animationSpec = tween(300, easing = MotionTokens.EmphasizedDecelerate),
+        ) + fadeIn(tween(300)),
+        exit = fadeOut(tween(150)),
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(message, color = TextPrimary, style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(20.dp))
-            Row {
-                if (retriable) {
-                    Button(onClick = onRetry) { Text("Retry") }
-                    Spacer(Modifier.width(12.dp))
+        Box(
+            modifier = Modifier.fillMaxSize().background(Scrim),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    message,
+                    color = TextPrimary,
+                    style = MaterialTheme.typography.titleMedium,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 48.dp).widthIn(max = 640.dp),
+                )
+                Spacer(Modifier.height(20.dp))
+                Row {
+                    if (retriable) {
+                        Button(onClick = onRetry, modifier = Modifier.focusRequester(primaryFocus)) {
+                            Text("Retry")
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Button(onClick = onExit) { Text("Back") }
+                    } else {
+                        Button(onClick = onExit, modifier = Modifier.focusRequester(primaryFocus)) {
+                            Text("Back")
+                        }
+                    }
                 }
-                Button(onClick = onExit) { Text("Back") }
             }
         }
     }
 }
 
+/**
+ * The one up-next design shared by the internal (ExoPlayer) and external (VLC)
+ * hosts. [remaining] is collected only inside [CountdownRing] — a leaf far below
+ * this composable — so the 1Hz tick never recomposes the card, the poster
+ * thumbnail, or the buttons around it.
+ */
 @Composable
-private fun UpNextOverlay(
-    title: String,
-    secondsLeft: Int,
+private fun UpNextCard(
+    nextTitle: String,
+    posterUrl: String?,
+    remaining: StateFlow<Int?>,
     onPlayNow: () -> Unit,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val playNowFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { playNowFocus.requestFocus() } }
+
     Surface(
-        modifier = modifier.padding(48.dp).width(360.dp),
-        colors = SurfaceDefaults.colors(containerColor = Color(0xEE171B22)),
+        shape = RoundedCornerShape(12.dp),
+        colors = SurfaceDefaults.colors(containerColor = SurfaceColor.copy(alpha = 0.95f)),
+        modifier = modifier
+            .padding(48.dp)
+            .width(420.dp)
+            .focusGroup(),
     ) {
-        Column(Modifier.padding(20.dp)) {
-            Text("Up next in ${secondsLeft}s", color = TextSecondary, style = MaterialTheme.typography.labelMedium)
-            Spacer(Modifier.height(4.dp))
-            Text(
-                title,
-                color = TextPrimary,
-                style = MaterialTheme.typography.titleMedium,
-                maxLines = 2,
+        Row(
+            modifier = Modifier.padding(20.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            PosterCard(
+                title = nextTitle,
+                posterUrl = posterUrl,
+                onClick = {},
+                widthDp = 80.dp,
+                modifier = Modifier.focusProperties { canFocus = false },
             )
-            Spacer(Modifier.height(16.dp))
-            Row {
-                Button(onClick = onPlayNow) { Text("Play now") }
-                Spacer(Modifier.width(12.dp))
-                Button(onClick = onCancel) { Text("Cancel") }
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Up next", color = TextSecondary, style = MaterialTheme.typography.labelMedium)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    nextTitle,
+                    color = TextPrimary,
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 2,
+                )
+                Spacer(Modifier.height(12.dp))
+                Row {
+                    Button(
+                        onClick = onPlayNow,
+                        colors = ButtonDefaults.colors(containerColor = Accent, contentColor = OnAccent),
+                        modifier = Modifier.focusRequester(playNowFocus),
+                    ) { Text("Play now") }
+                    Spacer(Modifier.width(12.dp))
+                    Button(onClick = onCancel) { Text("Cancel") }
+                }
             }
+            Spacer(Modifier.width(16.dp))
+            CountdownRing(remaining)
         }
+    }
+}
+
+/** The only node that collects the 1Hz countdown — a smooth draining ring, not a jumping digit. */
+@Composable
+private fun CountdownRing(remaining: StateFlow<Int?>, modifier: Modifier = Modifier) {
+    val remainingValue by remaining.collectAsStateWithLifecycle()
+    val progress by animateFloatAsState(
+        targetValue = (remainingValue ?: 0) / 5f,
+        animationSpec = tween(1_000, easing = LinearEasing),
+        label = "upNextCountdown",
+    )
+    Box(modifier = modifier.size(40.dp), contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) {
+            drawArc(
+                color = Accent,
+                startAngle = -90f,
+                sweepAngle = 360f * progress,
+                useCenter = false,
+                style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round),
+            )
+        }
+        Text("${remainingValue ?: 0}", color = TextPrimary, style = MaterialTheme.typography.labelMedium)
     }
 }
