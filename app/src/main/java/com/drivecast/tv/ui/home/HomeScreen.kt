@@ -49,9 +49,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -59,12 +61,16 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.drivecast.tv.LocalAppContainer
 import com.drivecast.tv.api.ContinueItem
 import com.drivecast.tv.api.SectionInfo
@@ -99,6 +105,7 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Surface
 import androidx.tv.material3.SurfaceDefaults
 import androidx.tv.material3.Text
+import kotlinx.coroutines.delay
 
 private const val ENTERTAINMENT = "entertainment"
 
@@ -199,8 +206,25 @@ private fun HomeContent(
         runCatching { initialFocus.requestFocus() }
     }
 
-    PositionFocusedItemInLazyLayout(0.10f) {
-        Column(Modifier.fillMaxSize()) {
+    // Ambient backdrop identity. Written only by PosterCard's onFocused hook below — never read
+    // by LibraryTile/ContinueCard or threaded through their parameters — so cards themselves never
+    // recompose when focus moves; only HomeBackdrop (which reads backdropItem) does. A 400ms dwell
+    // sits between "focused" and "shown": rapid D-pad scrubbing across a row re-fires the effect
+    // before it fires, so the crossfade never thrashes on every keypress. The focus indicator
+    // itself (scale/border) is never debounced — only this side effect is.
+    var focusedItem by remember { mutableStateOf<BackdropItem?>(null) }
+    val onCardFocused = remember { { item: BackdropItem -> focusedItem = item } }
+    var backdropItem by remember { mutableStateOf<BackdropItem?>(null) }
+    LaunchedEffect(focusedItem) {
+        delay(400)
+        backdropItem = focusedItem
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        HomeBackdrop(item = backdropItem, posterUrl = posterUrl)
+
+        PositionFocusedItemInLazyLayout(0.10f) {
+            Column(Modifier.fillMaxSize()) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(start = 48.dp, end = 48.dp, top = 28.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -308,6 +332,7 @@ private fun HomeContent(
                                                 posterUrl = posterUrl(item.poster),
                                                 onClick = { onPlayContinue(item) },
                                                 onDismiss = { onDismissRequest(item) },
+                                                onFocused = { onCardFocused(BackdropItem(item.fileId, item.poster)) },
                                                 focusRequester = if (idx == 0 && i == 0) initialFocus else null,
                                             )
                                         }
@@ -344,6 +369,7 @@ private fun HomeContent(
                                 isEntertainment = isEntertainment,
                                 posterUrl = posterUrl(title.poster),
                                 onOpenTitle = onTitleClick,
+                                onFocused = { onCardFocused(BackdropItem(title.id, title.poster)) },
                                 focusRequester = if (idx == 0 && sectionContinue.isEmpty() && i == 0) {
                                     initialFocus
                                 } else {
@@ -358,6 +384,71 @@ private fun HomeContent(
                         }
                     }
                 }
+            }
+        }
+    }
+    }
+}
+
+// ---- Ambient backdrop ----
+
+/**
+ * Minimal identity for the ambient backdrop: distinct from [Title]/[ContinueItem] because both the
+ * Continue Watching shelf and the grid feed it, and the backdrop only ever needs a stable key (for
+ * Crossfade identity) plus the poster path to resolve through the existing posterUrl() lookup.
+ */
+private data class BackdropItem(val key: String, val poster: String?)
+
+/**
+ * The hand-rolled immersive-list backdrop (androidx.tv.material3's ImmersiveList was removed).
+ * Sits BEHIND [HomeContent]'s Column, one 960x540px bitmap at a time — Coil's memory cache keeps
+ * only the current + previous frame alive, never a full-res decode. [item] is fed by a 400ms dwell
+ * debounce upstream, so this Crossfade only ever fires on rest, not on every D-pad press.
+ */
+@Composable
+private fun HomeBackdrop(item: BackdropItem?, posterUrl: (String?) -> String?) {
+    val imageLoader = LocalAppContainer.current.imageLoader
+    val context = LocalContext.current
+
+    Crossfade(
+        targetState = item,
+        animationSpec = tween(500),
+        label = "homeBackdrop",
+    ) { target ->
+        val url = target?.let { posterUrl(it.poster) }
+        if (url != null) {
+            Box(Modifier.fillMaxSize()) {
+                val request = remember(url) {
+                    ImageRequest.Builder(context)
+                        .data(url)
+                        .size(960, 540)
+                        .build()
+                }
+                AsyncImage(
+                    model = request,
+                    imageLoader = imageLoader,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer { alpha = 0.35f },
+                )
+                // Gradient into the Background token (not pure black) so the image dissolves into
+                // the UI instead of hard-cutting to a letterbox.
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .drawWithCache {
+                            val brush = Brush.verticalGradient(
+                                colors = listOf(Color.Transparent, Background),
+                                startY = size.height * 0.3f,
+                                endY = size.height,
+                            )
+                            onDrawBehind { drawRect(brush) }
+                        },
+                )
+                // Full wash so grid text stays WCAG-readable over the ambient image.
+                Box(Modifier.fillMaxSize().background(Background.copy(alpha = 0.55f)))
             }
         }
     }
@@ -453,6 +544,7 @@ private fun LibraryTile(
     posterUrl: String?,
     onOpenTitle: (String) -> Unit,
     modifier: Modifier = Modifier,
+    onFocused: (() -> Unit)? = null,
     focusRequester: FocusRequester? = null,
 ) {
     Column(modifier.width(160.dp)) {
@@ -461,6 +553,7 @@ private fun LibraryTile(
             posterUrl = posterUrl,
             onClick = { onOpenTitle(title.id) },
             widthDp = 160.dp,
+            onFocused = onFocused,
             modifier = focusRequester?.let { Modifier.focusRequester(it) } ?: Modifier,
         ) {
             if (isEntertainment && title.isShow) {
@@ -532,6 +625,7 @@ private fun ContinueCard(
     posterUrl: String?,
     onClick: () -> Unit,
     onDismiss: () -> Unit,
+    onFocused: (() -> Unit)? = null,
     focusRequester: FocusRequester? = null,
 ) {
     var focused by remember { mutableStateOf(false) }
@@ -542,6 +636,7 @@ private fun ContinueCard(
             posterUrl = posterUrl,
             onClick = onClick,
             widthDp = 140.dp,
+            onFocused = onFocused,
             modifier = Modifier
                 .onFocusChanged { focused = it.isFocused }
                 .onKeyEvent { e ->
