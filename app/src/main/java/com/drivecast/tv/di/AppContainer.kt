@@ -5,6 +5,9 @@ import android.graphics.Bitmap
 import coil.ImageLoader
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
+import com.drivecast.tv.api.ContinueItem
+import com.drivecast.tv.api.SectionInfo
+import com.drivecast.tv.api.Title
 import com.drivecast.tv.api.TokenInterceptor
 import com.drivecast.tv.data.Discovery
 import com.drivecast.tv.data.KeepAwakeController
@@ -14,6 +17,18 @@ import com.drivecast.tv.data.TokenHolder
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
+
+/**
+ * A timestamped snapshot of the home screen's three fetches (library, sections, continue
+ * watching), held on [AppContainer] so a destroyed-and-recreated HomeViewModel — e.g. after
+ * back-navigation — can seed its UI state synchronously instead of showing a skeleton again.
+ */
+data class HomeData(
+    val titles: List<Title>,
+    val sections: List<SectionInfo>,
+    val continueItems: List<ContinueItem>,
+    val fetchedAtMs: Long,
+)
 
 /**
  * Manual dependency container, built once by [com.drivecast.tv.DrivecastApp] and
@@ -66,4 +81,9 @@ class AppContainer(context: Context) {
         }
         .respectCacheHeaders(false)
         .build()
+
+    // Cache-first home screen (WI-07): seeded synchronously by a fresh HomeViewModel, then
+    // overwritten after every successful background refresh.
+    @Volatile
+    var homeCache: HomeData? = null
 }
