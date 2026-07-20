@@ -263,6 +263,11 @@ private fun HomeContent(
     // tab's node just before it's disposed — focus would silently die or jump. They're declared
     // per-tab instead, inside the AnimatedContent content lambda below.
     val pillsFirst = remember { FocusRequester() }
+    // Explicit vertical ladder bridge for the one boundary geometry can't cross reliably: the tab
+    // pills live in this outer scope, but their DOWN target (the active tab's top content lane)
+    // is a per-tab requester declared inside the AnimatedContent lambda. This hoisted requester is
+    // attached to whichever lane is topmost in the ACTIVE tab, so pills.down can name it from here.
+    val contentEntry = remember { FocusRequester() }
     var focusedOnce by rememberSaveable { mutableStateOf(false) }
 
     // Ambient backdrop identity. Written only by PosterCard's onFocused hook below — never read
@@ -332,6 +337,10 @@ private fun HomeContent(
                 Spacer(Modifier.height(16.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 48.dp)
+                        // DOWN from the pills always lands on the active tab's top content lane
+                        // (Continue Watching, else chips, else first tile) — deterministic, not a
+                        // geometric guess across the AnimatedContent boundary.
+                        .focusProperties { down = contentEntry }
                         .tvFocusRestorer { pillsFirst },
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
@@ -415,152 +424,156 @@ private fun HomeContent(
                     // key is needed here.
                     val gridState = rememberSaveable(saver = LazyGridState.Saver) { LazyGridState() }
 
-                    // The continue shelf and chips row each occupy one LazyGridScope item() slot
-                    // ahead of itemsIndexed(gridTitles), so a tile's *global* grid index is offset
-                    // by however many of those header slots are actually present.
-                    val headerSlots = (if (sectionContinue.isNotEmpty()) 1 else 0) +
-                        (if (chips.size > 1) 1 else 0)
-
-                    // `firstTile` used to be pinned to the grid's literal first tile (local index
-                    // 0) — but that's exactly as scrollable-away as continueLane/continueFirst:
-                    // once the pivot (PositionFocusedItemInLazyLayout above; gentled to 0.30f as a
-                    // secondary defense, see its comment) has scrolled the header out of view,
-                    // index 0 can be just as recycled/off-screen as the continue shelf is.
-                    // Deriving the target tile from the LazyGridState's own visible-items
-                    // report instead means `firstTile` always names whichever tile the layout itself
-                    // currently reports on-screen — something the restorer's requestFocus() probe
-                    // can actually land on — rather than a fixed index that may have scrolled off.
-                    // derivedStateOf collapses per-frame scroll-offset churn down to a value that
-                    // only changes when the reported item index actually changes, so this doesn't
-                    // recompose the visible tiles on every scroll pixel.
-                    // Keyed on gridTitles too (not just headerSlots): a category-chip switch
-                    // rebuilds gridTitles without necessarily changing headerSlots, and remember()
-                    // would otherwise keep the old derivedStateOf around, closing over the stale
-                    // list's size for the coerceIn bound below.
-                    val firstVisibleTileIndex by remember(headerSlots, gridTitles) {
+                    // Tiles are the only thing in the scrolling grid now (Continue Watching and the
+                    // category chips are FIXED lanes above it, not grid items), so a tile's grid
+                    // index is its logical index — no header-slot offset. Still derived from the
+                    // grid's own visible-items report so the enter fallback names a currently-
+                    // composed tile regardless of scroll depth; keyed on gridTitles so a category
+                    // switch doesn't leave a stale coerceIn bound.
+                    val firstVisibleTileIndex by remember(gridTitles) {
                         derivedStateOf {
-                            val globalIdx = gridState.layoutInfo.visibleItemsInfo.firstOrNull()?.index ?: 0
-                            (globalIdx - headerSlots).coerceIn(0, (gridTitles.size - 1).coerceAtLeast(0))
+                            (gridState.layoutInfo.visibleItemsInfo.firstOrNull()?.index ?: 0)
+                                .coerceIn(0, (gridTitles.size - 1).coerceAtLeast(0))
                         }
                     }
 
                     LaunchedEffect(Unit) {
-                        if (idx == 0 && !focusedOnce) {
-                            runCatching { (if (sectionContinue.isNotEmpty()) continueFirst else firstTile).requestFocus() }
+                        // idx == tabIndex (not a hard-coded 0): AnimatedContent only composes the
+                        // active tab, and selectedTab is rememberSaveable, so a back-nav could open
+                        // on a non-zero tab — initial focus must land on whichever tab opens.
+                        if (idx == tabIndex && !focusedOnce) {
+                            runCatching {
+                                when {
+                                    sectionContinue.isNotEmpty() -> continueFirst
+                                    chips.size > 1 -> chipsFirst
+                                    else -> firstTile
+                                }.requestFocus()
+                            }
                             focusedOnce = true
                         }
                     }
 
-                    LazyVerticalGrid(
-                        state = gridState,
-                        columns = GridCells.Adaptive(160.dp),
-                        contentPadding = PaddingValues(start = 48.dp, end = 48.dp, top = 8.dp, bottom = 48.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        // The grid is the outermost focus group: entering it from the pills (or
-                        // from another screen) always resolves to a live, currently-visible tile —
-                        // NOT Modifier.focusRestorer()'s built-in "restore the previously-focused
-                        // child" step. That step matches by the composite-key-hash of the child's
-                        // *position in the composition tree*, which for a recycling LazyVerticalGrid
-                        // is effectively per recycled slot, not per logical item: after scrolling the
-                        // grid away and back (e.g. DOWN through several rows, UP and out to the tab
-                        // pills, then DOWN again), the saved hash can match whatever item now happens
-                        // to occupy that slot. requestFocus() on it can report success even though
-                        // that slot is mid-recycle for the current scroll position, and focus quietly
-                        // ends up nowhere a frame later with no fallback — because
-                        // Modifier.focusRestorer() already told the search machinery the move was
-                        // handled (see tvFocusEnterFallback's doc comment). That is the "DOWN from the
-                        // tab pills into the grid deterministically drops to zero focused nodes" bug.
-                        // tvFocusEnterFallback skips that step entirely and always re-resolves the
-                        // target itself. Same fallback order as before: firstTile is tied to
-                        // whichever tile the grid itself reports visible (see firstVisibleTileIndex
-                        // above), so it stays a legitimate, currently-composed target regardless of
-                        // scroll depth; chipsFirst/continueFirst are only reached when there are no
-                        // tiles at all, i.e. the grid hasn't scrolled past the header yet, so they're
-                        // still on-screen whenever they're actually picked. The `idx != tabIndex`
-                        // branch is what actually blocks the outgoing tab's subtree from taking focus
-                        // during the AnimatedContent crossfade (both tabs are briefly composed
-                        // together), so a D-pad press mid-fade can never wander into a subtree that's
-                        // about to be disposed.
-                        modifier = Modifier.fillMaxSize().tvFocusEnterFallback {
-                            if (idx != tabIndex) {
-                                FocusRequester.Cancel
-                            } else when {
-                                gridTitles.isNotEmpty() -> firstTile
-                                chips.size > 1 -> chipsFirst
-                                sectionContinue.isNotEmpty() -> continueFirst
-                                else -> FocusRequester.Default
-                            }
-                        },
-                    ) {
+                    // Four STABLE, non-recycling focus lanes stacked top-to-bottom, matching the
+                    // user's mental model exactly: tab pills (above, in the outer Column) -> Continue
+                    // Watching -> category chips -> content grid. Only the content grid scrolls; the
+                    // Continue shelf and chips are fixed siblings that never recycle or scroll off-
+                    // screen. That is the whole fix: vertical D-pad moves between lanes are now plain
+                    // adjacent-sibling focus searches over composed nodes, instead of restores routed
+                    // through a recycling grid whose header slots scroll away and drop focus to zero
+                    // nodes. Each lane still carries a tvFocusRestorer fallback to its first item so
+                    // horizontal re-entry always lands somewhere live.
+                    // Ladder targets between the fixed single-row lanes. Topmost content lane also
+                    // holds `contentEntry` (only for the active tab, so the crossfade's briefly-
+                    // composed outgoing tab can't steal the pills' DOWN target).
+                    val hasPills = tabs.size > 1
+                    val hasChips = chips.size > 1
+                    val topLane = if (sectionContinue.isNotEmpty()) "cw" else if (hasChips) "chips" else "grid"
+                    fun Modifier.asContentEntry(id: String) =
+                        if (idx == tabIndex && topLane == id) this.focusRequester(contentEntry) else this
+
+                    Column(Modifier.fillMaxSize()) {
                         if (sectionContinue.isNotEmpty()) {
-                            item(span = { GridItemSpan(maxLineSpan) }) {
-                                Column {
-                                    ShelfHeader(section?.continueLabel?.ifBlank { null } ?: "Continue Watching")
-                                    Spacer(Modifier.height(4.dp))
-                                    LazyRow(
-                                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                                        contentPadding = PaddingValues(vertical = 24.dp),
-                                        modifier = Modifier
-                                            .focusRequester(continueLane)
-                                            .tvFocusRestorer { continueFirst },
-                                    ) {
-                                        itemsIndexed(
-                                            sectionContinue,
-                                            key = { _, item -> item.fileId },
-                                            contentType = { _, _ -> "continue" },
-                                        ) { i, item ->
-                                            ContinueCard(
-                                                item = item,
-                                                posterUrl = posterUrl(item.poster),
-                                                onClick = { onPlayContinue(item) },
-                                                onDismiss = { onDismissRequest(item) },
-                                                onFocused = { onCardFocused(BackdropItem(item.fileId, item.poster)) },
-                                                focusRequester = if (i == 0) continueFirst else null,
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        if (chips.size > 1) {
-                            item(span = { GridItemSpan(maxLineSpan) }) {
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    modifier = Modifier.tvFocusRestorer { chipsFirst },
-                                ) {
-                                    chips.forEachIndexed { chipIdx, chip ->
-                                        PillButton(
-                                            selected = selectedCat == chip.category,
-                                            label = chip.label,
-                                            onClick = { selectedCat = chip.category },
-                                            modifier = if (chipIdx == 0) Modifier.focusRequester(chipsFirst) else Modifier,
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        itemsIndexed(
-                            gridTitles,
-                            key = { _, title -> title.id },
-                            contentType = { _, _ -> "poster" },
-                        ) { i, title ->
-                            LibraryTile(
-                                title = title,
-                                section = section,
-                                isEntertainment = isEntertainment,
-                                posterUrl = posterUrl(title.poster),
-                                onOpenTitle = onTitleClick,
-                                onFocused = { onCardFocused(BackdropItem(title.id, title.poster)) },
-                                focusRequester = if (i == firstVisibleTileIndex) firstTile else null,
-                                // Chip filtering removes/adds items; the remaining ones glide to
-                                // their new position instead of popping.
-                                modifier = Modifier.animateItem(
-                                    placementSpec = tween(300, easing = MotionTokens.Emphasized)
-                                ),
+                            ShelfHeader(
+                                section?.continueLabel?.ifBlank { null } ?: "Continue Watching",
+                                Modifier.padding(start = 48.dp, end = 48.dp),
                             )
+                            Spacer(Modifier.height(4.dp))
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                contentPadding = PaddingValues(start = 48.dp, end = 48.dp, top = 8.dp, bottom = 20.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .focusRequester(continueLane)
+                                    .asContentEntry("cw")
+                                    .focusProperties {
+                                        if (hasPills) up = pillsFirst
+                                        down = if (hasChips) chipsFirst else firstTile
+                                    }
+                                    .tvFocusEnterFallback { continueFirst },
+                            ) {
+                                itemsIndexed(
+                                    sectionContinue,
+                                    key = { _, item -> item.fileId },
+                                    contentType = { _, _ -> "continue" },
+                                ) { i, item ->
+                                    ContinueCard(
+                                        item = item,
+                                        posterUrl = posterUrl(item.poster),
+                                        onClick = { onPlayContinue(item) },
+                                        onDismiss = { onDismissRequest(item) },
+                                        onFocused = { onCardFocused(BackdropItem(item.fileId, item.poster)) },
+                                        focusRequester = if (i == 0) continueFirst else null,
+                                    )
+                                }
+                            }
+                        }
+
+                        if (hasChips) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 48.dp, end = 48.dp, top = 4.dp, bottom = 12.dp)
+                                    .asContentEntry("chips")
+                                    .focusProperties {
+                                        if (sectionContinue.isNotEmpty()) up = continueFirst
+                                        else if (hasPills) up = pillsFirst
+                                        down = firstTile
+                                    }
+                                    .tvFocusRestorer { chipsFirst },
+                            ) {
+                                chips.forEachIndexed { chipIdx, chip ->
+                                    PillButton(
+                                        selected = selectedCat == chip.category,
+                                        label = chip.label,
+                                        onClick = { selectedCat = chip.category },
+                                        modifier = if (chipIdx == 0) Modifier.focusRequester(chipsFirst) else Modifier,
+                                    )
+                                }
+                            }
+                        }
+
+                        LazyVerticalGrid(
+                            state = gridState,
+                            columns = GridCells.Adaptive(160.dp),
+                            contentPadding = PaddingValues(start = 48.dp, end = 48.dp, top = 4.dp, bottom = 48.dp),
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                            // Entering the grid always resolves to a live, currently-visible tile via
+                            // tvFocusEnterFallback (firstTile tracks the grid's own reported first
+                            // visible index, so it survives any scroll depth). The idx != tabIndex
+                            // branch blocks the outgoing tab's grid from taking focus during the
+                            // AnimatedContent crossfade.
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                                .asContentEntry("grid")
+                                .tvFocusEnterFallback {
+                                    if (idx != tabIndex) FocusRequester.Cancel
+                                    else if (gridTitles.isNotEmpty()) firstTile
+                                    else FocusRequester.Default
+                                },
+                        ) {
+                            itemsIndexed(
+                                gridTitles,
+                                key = { _, title -> title.id },
+                                contentType = { _, _ -> "poster" },
+                            ) { i, title ->
+                                LibraryTile(
+                                    title = title,
+                                    section = section,
+                                    isEntertainment = isEntertainment,
+                                    posterUrl = posterUrl(title.poster),
+                                    onOpenTitle = onTitleClick,
+                                    onFocused = { onCardFocused(BackdropItem(title.id, title.poster)) },
+                                    focusRequester = if (i == firstVisibleTileIndex) firstTile else null,
+                                    // Chip filtering removes/adds items; the remaining ones glide to
+                                    // their new position instead of popping.
+                                    modifier = Modifier.animateItem(
+                                        placementSpec = tween(300, easing = MotionTokens.Emphasized)
+                                    ),
+                                )
+                            }
                         }
                     }
                     }
@@ -803,8 +816,8 @@ private fun PillButton(
 }
 
 @Composable
-private fun ShelfHeader(text: String) {
-    Text(text, style = MaterialTheme.typography.titleLarge, color = TextPrimary)
+private fun ShelfHeader(text: String, modifier: Modifier = Modifier) {
+    Text(text, style = MaterialTheme.typography.titleLarge, color = TextPrimary, modifier = modifier)
 }
 
 @Composable
