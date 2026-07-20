@@ -39,6 +39,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -72,7 +73,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavBackStackEntry
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.drivecast.tv.LocalAppContainer
@@ -101,6 +104,7 @@ import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import com.drivecast.tv.ui.common.PositionFocusedItemInLazyLayout
+import com.drivecast.tv.ui.common.tvFocusEnterFallback
 import com.drivecast.tv.ui.common.tvFocusRestorer
 import androidx.tv.material3.Border
 import androidx.tv.material3.Button
@@ -119,11 +123,39 @@ private const val ENTERTAINMENT = "entertainment"
 fun HomeScreen(
     onOpenTitle: (titleId: String) -> Unit,
     onPlay: (titleId: String, fileId: String) -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     val container = LocalAppContainer.current
     val vm: HomeViewModel = viewModel(factory = HomeViewModel.factory(container))
     val state by vm.state.collectAsStateWithLifecycle()
     val pendingDismiss = remember { mutableStateOf<ContinueItem?>(null) }
+
+    // Refresh-on-return from Settings: Navigation-Compose scopes each destination's
+    // ViewModelStore (and SavedStateHandle) to its own NavBackStackEntry, and that entry *is*
+    // exactly what LocalViewModelStoreOwner resolves to for a composable() destination — so this
+    // reaches Home's own NavBackStackEntry.savedStateHandle without HomeScreen needing a
+    // NavController reference or MainActivity threading one down as an extra parameter. Settings
+    // is pushed on top of Home (not popUpTo-replacing it), so HomeViewModel is NOT recreated
+    // across that round trip — its init{}-time load() never re-runs — which is exactly why a
+    // rename/reorder saved in Settings would otherwise never reach Home's already-live state.
+    // DrivecastNav's "settings" route stashes savedStateHandle["tabsChanged"] = true on *this*
+    // entry right before popping back; getStateFlow (not a one-shot read) means this LaunchedEffect
+    // still sees the flip even if it lands before this composable has had a chance to recompose.
+    val homeBackStackEntry = LocalViewModelStoreOwner.current as? NavBackStackEntry
+    val tabsChanged by homeBackStackEntry
+        ?.savedStateHandle
+        ?.getStateFlow("tabsChanged", false)
+        ?.collectAsStateWithLifecycle()
+        ?: remember { mutableStateOf(false) }
+    LaunchedEffect(tabsChanged) {
+        if (tabsChanged) {
+            vm.refresh()
+            // Clear immediately (not after refresh completes) so a rapid second Settings visit
+            // re-arms the flag rather than getting swallowed by an in-flight refresh's eventual
+            // "already consumed" state.
+            homeBackStackEntry?.savedStateHandle?.set("tabsChanged", false)
+        }
+    }
 
     // TTFD: drawn once real content is on screen, not on the skeleton/cache-seeded first frame.
     ReportDrawnWhen { state.titles?.isNotEmpty() == true }
@@ -156,6 +188,7 @@ fun HomeScreen(
                             },
                             onDismissRequest = { pendingDismiss.value = it },
                             onRefresh = { vm.refresh() },
+                            onOpenSettings = onOpenSettings,
                             posterUrl = { key -> container.repository.posterUrl(key) },
                         )
                     }
@@ -188,6 +221,7 @@ private fun HomeContent(
     onPlayContinue: (ContinueItem) -> Unit,
     onDismissRequest: (ContinueItem) -> Unit,
     onRefresh: () -> Unit,
+    onOpenSettings: () -> Unit,
     posterUrl: (String?) -> String?,
 ) {
     // ONE stable (String) -> Unit reference handed to every grid item lambda below, instead of
@@ -255,7 +289,17 @@ private fun HomeContent(
     Box(Modifier.fillMaxSize()) {
         HomeBackdrop(item = { backdropItem }, posterUrl = posterUrl)
 
-        PositionFocusedItemInLazyLayout(0.10f) {
+        // Secondary/defense-in-depth for the onRestoreFailed fallback-recycling bug (see
+        // tvFocusRestorer's fallback chain above and FocusKit.kt's onRestoreFailed handling for
+        // the actual fixes): a 0.10f pivot pins the focused row almost flush with the top of the
+        // viewport, so descending just one or two grid rows already scrolls the Continue shelf +
+        // chips header fully out of the composed/cached window, recycling continueLane/
+        // continueFirst/chipsFirst — exactly the targets a restore fallback may need. A gentler
+        // 0.30f pivot leaves more headroom above the focused row, so the same downward scroll
+        // covers less distance per row and the header rows stay composed for longer before they
+        // scroll off, without going so far (e.g. a centered ~0.5f) that it fights the natural
+        // reading position of a focused tile.
+        PositionFocusedItemInLazyLayout(0.30f) {
             Column(Modifier.fillMaxSize()) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(start = 48.dp, end = 48.dp, top = 28.dp),
@@ -269,10 +313,18 @@ private fun HomeContent(
                     Text("drivecast", style = MaterialTheme.typography.headlineMedium, color = Accent)
                     if (refreshing) RefreshIndicator()
                 }
-                // Demoted from a prime top-right "Refresh" button to a small icon so the
-                // wordmark + tab titles own the header's visual hierarchy.
-                IconButton(onClick = onRefresh) {
-                    Text("⟳", style = MaterialTheme.typography.titleLarge, color = TextSecondary)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // Demoted from a prime top-right "Refresh" button to a small icon so the
+                    // wordmark + tab titles own the header's visual hierarchy.
+                    IconButton(onClick = onRefresh) {
+                        Text("⟳", style = MaterialTheme.typography.titleLarge, color = TextSecondary)
+                    }
+                    IconButton(onClick = onOpenSettings) {
+                        Text("⚙", style = MaterialTheme.typography.titleLarge, color = TextSecondary)
+                    }
                 }
             }
 
@@ -363,6 +415,35 @@ private fun HomeContent(
                     // key is needed here.
                     val gridState = rememberSaveable(saver = LazyGridState.Saver) { LazyGridState() }
 
+                    // The continue shelf and chips row each occupy one LazyGridScope item() slot
+                    // ahead of itemsIndexed(gridTitles), so a tile's *global* grid index is offset
+                    // by however many of those header slots are actually present.
+                    val headerSlots = (if (sectionContinue.isNotEmpty()) 1 else 0) +
+                        (if (chips.size > 1) 1 else 0)
+
+                    // `firstTile` used to be pinned to the grid's literal first tile (local index
+                    // 0) — but that's exactly as scrollable-away as continueLane/continueFirst:
+                    // once the pivot (PositionFocusedItemInLazyLayout above; gentled to 0.30f as a
+                    // secondary defense, see its comment) has scrolled the header out of view,
+                    // index 0 can be just as recycled/off-screen as the continue shelf is.
+                    // Deriving the target tile from the LazyGridState's own visible-items
+                    // report instead means `firstTile` always names whichever tile the layout itself
+                    // currently reports on-screen — something the restorer's requestFocus() probe
+                    // can actually land on — rather than a fixed index that may have scrolled off.
+                    // derivedStateOf collapses per-frame scroll-offset churn down to a value that
+                    // only changes when the reported item index actually changes, so this doesn't
+                    // recompose the visible tiles on every scroll pixel.
+                    // Keyed on gridTitles too (not just headerSlots): a category-chip switch
+                    // rebuilds gridTitles without necessarily changing headerSlots, and remember()
+                    // would otherwise keep the old derivedStateOf around, closing over the stale
+                    // list's size for the coerceIn bound below.
+                    val firstVisibleTileIndex by remember(headerSlots, gridTitles) {
+                        derivedStateOf {
+                            val globalIdx = gridState.layoutInfo.visibleItemsInfo.firstOrNull()?.index ?: 0
+                            (globalIdx - headerSlots).coerceIn(0, (gridTitles.size - 1).coerceAtLeast(0))
+                        }
+                    }
+
                     LaunchedEffect(Unit) {
                         if (idx == 0 && !focusedOnce) {
                             runCatching { (if (sectionContinue.isNotEmpty()) continueFirst else firstTile).requestFocus() }
@@ -377,23 +458,37 @@ private fun HomeContent(
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
                         // The grid is the outermost focus group: entering it from the pills (or
-                        // from another screen) restores the last-focused card. When that card is
-                        // gone (tab rebuilt, item recycled), fall through the lanes in display
-                        // order instead of dropping the press. The group stays deactivated
-                        // (canFocus = false, same as focusGroup()'s default) so D-pad search still
-                        // recurses into the cards instead of stopping on the group itself; the
-                        // enter = Cancel gate below is what actually blocks the outgoing tab's
-                        // subtree from taking focus during the AnimatedContent crossfade (both tabs
-                        // are briefly composed together), so a D-pad press mid-fade can never wander
-                        // into a subtree that's about to be disposed.
-                        modifier = Modifier.fillMaxSize().focusProperties {
-                            canFocus = false // preserve focusGroup's deactivation — the outermost focusProperties wins
-                            if (idx != tabIndex) enter = { FocusRequester.Cancel } // block D-pad entry into the outgoing tab during the crossfade
-                        }.tvFocusRestorer {
-                            when {
-                                sectionContinue.isNotEmpty() -> continueLane
+                        // from another screen) always resolves to a live, currently-visible tile —
+                        // NOT Modifier.focusRestorer()'s built-in "restore the previously-focused
+                        // child" step. That step matches by the composite-key-hash of the child's
+                        // *position in the composition tree*, which for a recycling LazyVerticalGrid
+                        // is effectively per recycled slot, not per logical item: after scrolling the
+                        // grid away and back (e.g. DOWN through several rows, UP and out to the tab
+                        // pills, then DOWN again), the saved hash can match whatever item now happens
+                        // to occupy that slot. requestFocus() on it can report success even though
+                        // that slot is mid-recycle for the current scroll position, and focus quietly
+                        // ends up nowhere a frame later with no fallback — because
+                        // Modifier.focusRestorer() already told the search machinery the move was
+                        // handled (see tvFocusEnterFallback's doc comment). That is the "DOWN from the
+                        // tab pills into the grid deterministically drops to zero focused nodes" bug.
+                        // tvFocusEnterFallback skips that step entirely and always re-resolves the
+                        // target itself. Same fallback order as before: firstTile is tied to
+                        // whichever tile the grid itself reports visible (see firstVisibleTileIndex
+                        // above), so it stays a legitimate, currently-composed target regardless of
+                        // scroll depth; chipsFirst/continueFirst are only reached when there are no
+                        // tiles at all, i.e. the grid hasn't scrolled past the header yet, so they're
+                        // still on-screen whenever they're actually picked. The `idx != tabIndex`
+                        // branch is what actually blocks the outgoing tab's subtree from taking focus
+                        // during the AnimatedContent crossfade (both tabs are briefly composed
+                        // together), so a D-pad press mid-fade can never wander into a subtree that's
+                        // about to be disposed.
+                        modifier = Modifier.fillMaxSize().tvFocusEnterFallback {
+                            if (idx != tabIndex) {
+                                FocusRequester.Cancel
+                            } else when {
                                 gridTitles.isNotEmpty() -> firstTile
                                 chips.size > 1 -> chipsFirst
+                                sectionContinue.isNotEmpty() -> continueFirst
                                 else -> FocusRequester.Default
                             }
                         },
@@ -459,7 +554,7 @@ private fun HomeContent(
                                 posterUrl = posterUrl(title.poster),
                                 onOpenTitle = onTitleClick,
                                 onFocused = { onCardFocused(BackdropItem(title.id, title.poster)) },
-                                focusRequester = if (i == 0) firstTile else null,
+                                focusRequester = if (i == firstVisibleTileIndex) firstTile else null,
                                 // Chip filtering removes/adds items; the remaining ones glide to
                                 // their new position instead of popping.
                                 modifier = Modifier.animateItem(
@@ -588,7 +683,7 @@ private fun categoryOf(title: Title): String =
 
 private data class CategoryChip(val label: String, val category: String?)
 
-private val KNOWN_CATEGORIES = setOf("movie", "show", "documentary")
+private val KNOWN_CATEGORIES = setOf("movie", "show")
 
 private fun matchesCategory(title: Title, selected: String?): Boolean = when (selected) {
     null -> true
@@ -604,7 +699,6 @@ private fun visibleChips(titles: List<Title>): List<CategoryChip> {
         add(CategoryChip("All", null))
         if ("movie" in present) add(CategoryChip("Movies", "movie"))
         if ("show" in present) add(CategoryChip("TV Shows", "show"))
-        if ("documentary" in present) add(CategoryChip("Documentaries", "documentary"))
         if (hasOther) add(CategoryChip("Other", "other"))
     }
 }
