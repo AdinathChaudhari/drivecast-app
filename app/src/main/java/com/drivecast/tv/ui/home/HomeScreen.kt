@@ -11,6 +11,7 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -52,6 +53,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.focus.FocusRequester
@@ -67,6 +69,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -114,6 +117,7 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Surface
 import androidx.tv.material3.SurfaceDefaults
 import androidx.tv.material3.Text
+import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 
@@ -417,6 +421,37 @@ private fun HomeContent(
                     val chipsFirst = remember { FocusRequester() }
                     val firstTile = remember { FocusRequester() }
 
+                    // Whether focus currently lives inside the content grid, for this tab only.
+                    // Plain (non-saveable) remember: transient UI state that self-heals on
+                    // re-entry — it starts false, and if focus restores into the grid the grid's
+                    // own onFocusChanged (below) flips it true again.
+                    var contentFocused by remember { mutableStateOf(false) }
+
+                    // Drives the CW+chips header's reported height: 1f = fully expanded (focus on
+                    // CW/chips/pills), 0f = fully collapsed (focus in the grid), letting the grid's
+                    // weight(1f) reclaim the freed space. Gated on contentFocused (a focus-graph
+                    // fact), never on scroll offset, so it can't feedback-loop against the grid's
+                    // own weight-driven height.
+                    val collapse by animateFloatAsState(
+                        targetValue = if (contentFocused) 0f else 1f,
+                        animationSpec = tween(durationMillis = 300, easing = MotionTokens.Emphasized),
+                        label = "headerCollapse",
+                    )
+
+                    // One node wrapping the CW+chips block: measures its children at full natural
+                    // size every frame (keeping continueFirst/chipsFirst attached even at
+                    // collapse == 0) but *reports* a height scaled by `collapse`, sliding the
+                    // excess up and out from under the pinned tab pills. Cosmetic alpha fade rides
+                    // along; focus keeps working throughout because the node stays composed.
+                    val collapseHeader = Modifier
+                        .layout { measurable, constraints ->
+                            val p = measurable.measure(constraints)
+                            val h = (p.height * collapse).roundToInt()
+                            layout(p.width, h) { p.placeRelative(0, -(p.height - h)) }
+                        }
+                        .clipToBounds()
+                        .graphicsLayer { alpha = collapse }
+
                     // One scroll+focus position per tab (fixes scroll carryover across tabs);
                     // rememberSaveable survives process death and, combined with tvFocusRestorer
                     // below, restores both scroll offset and the focused card on back-navigation.
@@ -472,6 +507,7 @@ private fun HomeContent(
                         if (idx == tabIndex && topLane == id) this.focusRequester(contentEntry) else this
 
                     Column(Modifier.fillMaxSize()) {
+                        Column(collapseHeader) {
                         if (sectionContinue.isNotEmpty()) {
                             ShelfHeader(
                                 section?.continueLabel?.ifBlank { null } ?: "Continue Watching",
@@ -485,6 +521,7 @@ private fun HomeContent(
                                     .fillMaxWidth()
                                     .focusRequester(continueLane)
                                     .asContentEntry("cw")
+                                    .onFocusChanged { if (it.hasFocus) contentFocused = false }
                                     .focusProperties {
                                         if (hasPills) up = pillsFirst
                                         down = if (hasChips) chipsFirst else firstTile
@@ -515,6 +552,7 @@ private fun HomeContent(
                                     .fillMaxWidth()
                                     .padding(start = 48.dp, end = 48.dp, top = 4.dp, bottom = 12.dp)
                                     .asContentEntry("chips")
+                                    .onFocusChanged { if (it.hasFocus) contentFocused = false }
                                     .focusProperties {
                                         if (sectionContinue.isNotEmpty()) up = continueFirst
                                         else if (hasPills) up = pillsFirst
@@ -532,6 +570,7 @@ private fun HomeContent(
                                 }
                             }
                         }
+                        }
 
                         LazyVerticalGrid(
                             state = gridState,
@@ -548,6 +587,12 @@ private fun HomeContent(
                                 .fillMaxWidth()
                                 .weight(1f)
                                 .asContentEntry("grid")
+                                .focusProperties {
+                                    up = if (hasChips) chipsFirst
+                                        else if (sectionContinue.isNotEmpty()) continueFirst
+                                        else FocusRequester.Default
+                                }
+                                .onFocusChanged { if (it.hasFocus) contentFocused = true }
                                 .tvFocusEnterFallback {
                                     if (idx != tabIndex) FocusRequester.Cancel
                                     else if (gridTitles.isNotEmpty()) firstTile
