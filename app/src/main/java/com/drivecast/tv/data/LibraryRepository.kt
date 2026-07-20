@@ -8,7 +8,10 @@ import com.drivecast.tv.api.PlaylistItem
 import com.drivecast.tv.api.ProgressBody
 import com.drivecast.tv.api.RemoteInfo
 import com.drivecast.tv.api.SectionInfo
+import com.drivecast.tv.api.SettingsPatch
+import com.drivecast.tv.api.SettingsSaveResponse
 import com.drivecast.tv.api.StreamRecent
+import com.drivecast.tv.api.TabPatch
 import com.drivecast.tv.api.Title
 import com.drivecast.tv.api.WatchedMap
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
@@ -162,6 +165,23 @@ class LibraryRepository(
         runCatching { requireApi().removeContinue(fileId).removed }.getOrDefault(false)
     }
 
+    /**
+     * Full round-trip of the "tabs" list (rename/reorder) — mirrors the web UI's
+     * POST /api/settings {tabs} contract. On success, refreshes [lastSections]
+     * from the server's echoed (re-resolved) tab list so callers can re-render
+     * without a separate [sections] fetch.
+     */
+    suspend fun saveTabs(tabs: List<TabPatch>): SettingsSaveResponse = withContext(Dispatchers.IO) {
+        val resp = requireApi().updateSettings(SettingsPatch(tabs = tabs))
+        val body = resp.body()
+        if (resp.isSuccessful && body != null) {
+            lastSections = body.tabs
+            body
+        } else {
+            SettingsSaveResponse(ok = false, tabs = lastSections)
+        }
+    }
+
     suspend fun postProgress(
         fileId: String,
         name: String?,
@@ -207,6 +227,24 @@ class LibraryRepository(
         "text/x-ssa", "application/x-ass", "text/x-ass" -> "text/x-ssa"
         else -> "application/x-subrip"
     }
+}
+
+/**
+ * The Kotlin twin of the web UI's currentTabsPayload() (app.js): rebuilds the
+ * full ordered tabs payload for POST /api/settings from the current section
+ * list. Each tab keeps its own key (renames must never re-slugify) and echoes
+ * accent/accent2 only when the server has already assigned them, so
+ * validate_tabs doesn't re-palette on an unrelated rename/reorder save.
+ */
+fun toTabPatch(sections: List<SectionInfo>): List<TabPatch> = sections.map { section ->
+    TabPatch(
+        key = section.key,
+        label = section.label,
+        icon = section.icon,
+        behavior = section.behavior,
+        accent = section.accent,
+        accent2 = section.accent2,
+    )
 }
 
 /** Holds the live access token so the shared interceptor can read it after re-pairing. */
