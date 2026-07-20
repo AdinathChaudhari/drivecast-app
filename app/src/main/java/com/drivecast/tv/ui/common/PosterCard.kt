@@ -90,7 +90,7 @@ fun PosterCard(
         // The app's signature focus trio: size-graded scale + white border + tinted glow.
         // Glow silently no-ops below API 28 (minSdk is 25), so the white border is the
         // guaranteed indicator across every device — never ship scale alone.
-        scale = CardDefaults.scale(focusedScale = 1.10f, pressedScale = 0.95f),
+        scale = CardDefaults.scale(focusedScale = 1.06f, pressedScale = 0.95f),
         border = CardDefaults.border(
             focusedBorder = Border(
                 border = BorderStroke(2.5.dp, Color.White.copy(alpha = 0.85f)),
@@ -99,7 +99,7 @@ fun PosterCard(
             ),
         ),
         glow = CardDefaults.glow(
-            focusedGlow = Glow(elevationColor = Accent.copy(alpha = 0.35f), elevation = 14.dp),
+            focusedGlow = Glow(elevationColor = Accent.copy(alpha = 0.35f), elevation = 10.dp),
         ),
         modifier = modifier
             .width(widthDp)
