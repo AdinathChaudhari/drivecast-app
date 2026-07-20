@@ -31,6 +31,7 @@ import com.drivecast.tv.ui.awake.KeepAwakeHost
 import com.drivecast.tv.ui.detail.DetailScreen
 import com.drivecast.tv.ui.home.HomeScreen
 import com.drivecast.tv.ui.player.PlayerScreen
+import com.drivecast.tv.ui.settings.SettingsScreen
 import com.drivecast.tv.ui.setup.SetupScreen
 import com.drivecast.tv.ui.theme.DrivecastTheme
 import kotlinx.coroutines.flow.first
@@ -94,20 +95,20 @@ private fun DrivecastNav(navController: NavHostController, startDestination: Str
         navController = navController,
         startDestination = startDestination,
         enterTransition = {
-            fadeIn(tween(210, delayMillis = 90, easing = LinearOutSlowInEasing)) +
+            fadeIn(tween(210, easing = LinearOutSlowInEasing)) +
                 scaleIn(
                     initialScale = 0.96f,
-                    animationSpec = tween(210, delayMillis = 90, easing = LinearOutSlowInEasing),
+                    animationSpec = tween(210, easing = LinearOutSlowInEasing),
                 )
         },
         exitTransition = {
             fadeOut(tween(90, easing = FastOutLinearInEasing))
         },
         popEnterTransition = {
-            fadeIn(tween(210, delayMillis = 90, easing = LinearOutSlowInEasing)) +
+            fadeIn(tween(210, easing = LinearOutSlowInEasing)) +
                 scaleIn(
                     initialScale = 0.96f,
-                    animationSpec = tween(210, delayMillis = 90, easing = LinearOutSlowInEasing),
+                    animationSpec = tween(210, easing = LinearOutSlowInEasing),
                 )
         },
         popExitTransition = {
@@ -126,6 +127,20 @@ private fun DrivecastNav(navController: NavHostController, startDestination: Str
             HomeScreen(
                 onOpenTitle = { titleId -> navController.navigate("detail/$titleId") },
                 onPlay = { titleId, fileId -> navController.navigate("player/$titleId/$fileId/false/false/0") },
+                onOpenSettings = { navController.navigate("settings") },
+            )
+        }
+        composable("settings") {
+            SettingsScreen(
+                onExit = { navController.popBackStack() },
+                // Home is the entry directly below Settings on the back stack (Settings is only
+                // ever pushed from Home), so this is always Home's own NavBackStackEntry — the
+                // same one HomeScreen reads via LocalViewModelStoreOwner. Stashing the flag here
+                // (rather than only in onExit) means it lands even if the eventual "Save" happens
+                // well before the user backs out of the screen.
+                onTabsChanged = {
+                    navController.previousBackStackEntry?.savedStateHandle?.set("tabsChanged", true)
+                },
             )
         }
         composable(

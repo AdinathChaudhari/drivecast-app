@@ -50,6 +50,37 @@ data class SectionInfo(
     // Which content-type this tab renders like ("entertainment" | "courses" |
     // "podcasts" | a plugin key). Null on legacy servers that predate behaviors.
     val behavior: String? = null,
+    // Tab accent palette (hex colors), assigned server-side by validate_tabs.
+    // Null on legacy servers or tabs not yet paletted (e.g. "entertainment").
+    val accent: String? = null,
+    val accent2: String? = null,
+)
+
+/**
+ * A single tab entry as sent to POST /api/settings ("tabs" list). Mirrors the
+ * web UI's currentTabsPayload() contract exactly: every field present, key
+ * kept stable across renames, accent/accent2 echoed back so validate_tabs
+ * doesn't re-palette.
+ */
+@Serializable
+data class TabPatch(
+    val key: String = "",
+    val label: String? = null,
+    val icon: String? = null,
+    val behavior: String? = null,
+    val accent: String? = null,
+    val accent2: String? = null,
+)
+
+@Serializable
+data class SettingsPatch(
+    val tabs: List<TabPatch> = emptyList(),
+)
+
+@Serializable
+data class SettingsSaveResponse(
+    val ok: Boolean = false,
+    val tabs: List<SectionInfo> = emptyList(),
 )
 
 @Serializable

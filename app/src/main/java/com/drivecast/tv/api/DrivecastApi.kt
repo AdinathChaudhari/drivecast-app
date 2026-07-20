@@ -25,6 +25,12 @@ interface DrivecastApi {
     @GET("api/sections")
     suspend fun sections(): SectionsResponse
 
+    // ---- tabs edit/reorder (TV Settings screen) ----
+
+    /** Full round-trip of the "tabs" list (rename/reorder). Auth via TokenInterceptor. */
+    @POST("api/settings")
+    suspend fun updateSettings(@Body body: SettingsPatch): Response<SettingsSaveResponse>
+
     @GET("api/title/{id}")
     suspend fun title(@Path("id") id: String): Response<Title>
 
