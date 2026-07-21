@@ -13,7 +13,8 @@ Built with Kotlin, Jetpack Compose for TV (`androidx.tv`), and Media3 / ExoPlaye
 - **Setup / pairing** — scans your local network for the server, or lets you type its IP,
   then validates the access token.
 - **Home** — a tabbed, tiled layout that mirrors the web UI: section tabs (Entertainment,
-  Courses, …) across the top, a section-scoped "Continue Watching" row, a category filter
+  Courses, …) across the top — horizontally scrollable, so a long list of sections never
+  crowds out the grid below — a section-scoped "Continue Watching" row, a category filter
   (All / Movies / TV Shows / Documentaries / …) on Entertainment, and a poster-tile grid —
   no more one long scroll.
 - **Detail** — movie play / start-over (plus an **Extras** section listing any featurettes /
