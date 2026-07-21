@@ -330,17 +330,22 @@ private fun HomeContent(
 
             if (tabs.size > 1) {
                 Spacer(Modifier.height(16.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 48.dp)
-                        .tvFocusRestorer { pillsFirst },
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth()
+                        .tvFocusEnterFallback { pillsFirst },
+                    contentPadding = PaddingValues(horizontal = 48.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    tabs.forEachIndexed { index, tab ->
+                    itemsIndexed(
+                        tabs,
+                        key = { _, tab -> tab.key },
+                        contentType = { _, _ -> "tabPill" },
+                    ) { index, tab ->
                         PillButton(
                             selected = index == tabIndex,
                             label = tabLabel(tab),
                             onClick = { selectedTab = index },
-                            modifier = if (index == 0) Modifier.focusRequester(pillsFirst) else Modifier,
+                            modifier = if (index == tabIndex) Modifier.focusRequester(pillsFirst) else Modifier,
                         )
                     }
                 }
@@ -485,11 +490,26 @@ private fun HomeContent(
                         modifier = Modifier.fillMaxSize().tvFocusEnterFallback {
                             if (idx != tabIndex) {
                                 FocusRequester.Cancel
-                            } else when {
-                                gridTitles.isNotEmpty() -> firstTile
-                                chips.size > 1 -> chipsFirst
-                                sectionContinue.isNotEmpty() -> continueFirst
-                                else -> FocusRequester.Default
+                            } else {
+                                // Entering the grid from the tab pills (DOWN) should mirror the
+                                // reverse (UP) path's row order. When the grid is at the very top
+                                // the header lanes (Continue shelf, then category chips) are
+                                // on-screen and composed, so land on the topmost one instead of
+                                // skipping straight to the first tile — otherwise DOWN from the
+                                // tabs jumps past the sub-tabs the user can plainly see (while UP
+                                // walks through them, an asymmetry). Once scrolled past them the
+                                // headers recycle (the 2251e7b restore-by-hash bug), so fall back
+                                // to the currently-visible tile, whose target the grid reports live.
+                                val atTop = gridState.firstVisibleItemIndex == 0 &&
+                                    gridState.firstVisibleItemScrollOffset == 0
+                                when {
+                                    atTop && sectionContinue.isNotEmpty() -> continueFirst
+                                    atTop && chips.size > 1 -> chipsFirst
+                                    gridTitles.isNotEmpty() -> firstTile
+                                    chips.size > 1 -> chipsFirst
+                                    sectionContinue.isNotEmpty() -> continueFirst
+                                    else -> FocusRequester.Default
+                                }
                             }
                         },
                     ) {
