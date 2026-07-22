@@ -56,7 +56,7 @@ class AppContainer(context: Context) {
 
     val discovery = Discovery()
 
-    val repository = LibraryRepository(okHttp, json, tokenHolder)
+    val repository = LibraryRepository(okHttp, json, tokenHolder, discovery, configStore)
 
     val keepAwake = KeepAwakeController(repository)
 
