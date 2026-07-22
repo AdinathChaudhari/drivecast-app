@@ -16,8 +16,11 @@ import com.drivecast.tv.api.Title
 import com.drivecast.tv.api.WatchedMap
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import java.io.IOException
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -37,9 +40,14 @@ class LibraryRepository(
     private val okHttp: OkHttpClient,
     private val json: Json,
     private val tokenHolder: TokenHolder,
+    private val discovery: Discovery,
+    private val configStore: ServerConfigStore,
 ) {
     private var baseUrl: String? = null
     private var api: DrivecastApi? = null
+
+    /** Serializes rediscovery so concurrent failing calls don't each sweep the /24. */
+    private val rediscoverMutex = Mutex()
 
     @Volatile
     var lastLibrary: LibraryResponse? = null
@@ -66,6 +74,43 @@ class LibraryRepository(
 
     private fun requireBase(): String =
         baseUrl?.removeSuffix("/") ?: error("LibraryRepository not configured with a server yet")
+
+    // ---- self-healing server address ----
+
+    /**
+     * Run a network read, and if it fails with a connect-level IO error (the saved
+     * server address went dead — e.g. DHCP moved the Mac to a new LAN IP), sweep the
+     * LAN once via [Discovery]. If a drivecast server turns up at a *different*
+     * address, reconfigure to it with the same token, persist it, and retry the call
+     * once. HTTP errors (HttpException from Retrofit) are NOT IOExceptions, so 401/403
+     * and friends pass straight through untouched.
+     */
+    private suspend fun <T> withAutoRediscover(block: suspend () -> T): T =
+        try {
+            block()
+        } catch (io: IOException) {
+            if (rediscoverToNewAddress(baseUrl)) block() else throw io
+        }
+
+    /**
+     * Returns true when the active server address is (now) a live, different one:
+     * either a concurrent caller already relocated us, or this call found a new
+     * server on the LAN and reconfigured to it. False means nothing better was found
+     * and the caller should surface the original failure.
+     */
+    private suspend fun rediscoverToNewAddress(staleBase: String?): Boolean = rediscoverMutex.withLock {
+        // A concurrent failure may have already relocated the base; if so, just retry.
+        if (normalize(baseUrl) != normalize(staleBase)) return true
+        val token = tokenHolder.token?.ifBlank { null } ?: return false
+        val candidate = discovery.scan()
+            .firstOrNull { normalize(it.baseUrl) != normalize(staleBase) }
+            ?: return false
+        configure(candidate.baseUrl, token)
+        configStore.save(candidate.baseUrl, token)
+        true
+    }
+
+    private fun normalize(url: String?): String? = url?.removeSuffix("/")
 
     // ---- URLs handed to Coil / ExoPlayer (token added by the interceptor) ----
 
@@ -110,32 +155,36 @@ class LibraryRepository(
 
     /** Validate a pairing by hitting /api/remote. 200 = ok, 403 = remote off, 401 = bad token. */
     suspend fun validateRemote(): retrofit2.Response<RemoteInfo> = withContext(Dispatchers.IO) {
-        requireApi().remote()
+        withAutoRediscover { requireApi().remote() }
     }
 
     suspend fun refresh(): LibraryResponse = withContext(Dispatchers.IO) {
-        val lib = requireApi().library()
-        lastLibrary = lib
-        lib
+        withAutoRediscover {
+            val lib = requireApi().library()
+            lastLibrary = lib
+            lib
+        }
     }
 
     /** Section metadata (labels, icons, per-section vocabulary) for the tabbed home. */
     suspend fun sections(): List<SectionInfo> = withContext(Dispatchers.IO) {
-        val list = requireApi().sections().sections
-        lastSections = list
-        list
+        withAutoRediscover {
+            val list = requireApi().sections().sections
+            lastSections = list
+            list
+        }
     }
 
     suspend fun continueWatching(): List<ContinueItem> = withContext(Dispatchers.IO) {
-        requireApi().continueWatching().items
+        withAutoRediscover { requireApi().continueWatching().items }
     }
 
     suspend fun watchedMap(): WatchedMap = withContext(Dispatchers.IO) {
-        requireApi().watchedMap()
+        withAutoRediscover { requireApi().watchedMap() }
     }
 
     suspend fun title(id: String): Title? = withContext(Dispatchers.IO) {
-        val resp = requireApi().title(id)
+        val resp = withAutoRediscover { requireApi().title(id) }
         if (resp.isSuccessful) resp.body() else null
     }
 
@@ -146,10 +195,12 @@ class LibraryRepository(
         shuffle: Boolean = false,
         seed: Long? = null,
     ): List<PlaylistItem> = withContext(Dispatchers.IO) {
-        requireApi().playlist(titleId, startFileId, if (shuffle) 1 else null, seed).items
+        withAutoRediscover { requireApi().playlist(titleId, startFileId, if (shuffle) 1 else null, seed).items }
     }
 
-    suspend fun streamRecent(): StreamRecent = withContext(Dispatchers.IO) { requireApi().streamRecent() }
+    suspend fun streamRecent(): StreamRecent = withContext(Dispatchers.IO) {
+        withAutoRediscover { requireApi().streamRecent() }
+    }
 
     // ---- keep-awake ("Are you still watching?") ----
 
