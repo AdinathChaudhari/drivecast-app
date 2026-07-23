@@ -1,3 +1,7 @@
+> **📦 Archived — moved to [google-drive-suite](https://github.com/AdinathChaudhari/google-drive-suite).**
+> This client now lives in the `drivecast-app/` folder of that monorepo; the
+> full commit history is preserved here, read-only.
+
 # drivecast for Fire TV
 
 A native Android TV / Amazon Fire TV client for a
